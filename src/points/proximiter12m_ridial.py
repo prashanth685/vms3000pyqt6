@@ -46,10 +46,11 @@ C = {
     "field_border":    "#6b7280",
 
     "combo_white_bg":  "#ffffff",   # Slot I/O Module Type dropdown
-    "combo_white_fg":  "#1a3a8c",
+    "combo_white_fg":  "#000000",
 
-    "combo_sel_bg":    "#1a3a5c",   # highlighted "Radial Vibration" look
-    "combo_sel_fg":    "#ffffff",
+    "combo_sel_bg":    "#1a3a5c",
+    "combo_sel_fg":    "#000000",
+
 
     "btn_face":        "#e7e9ec",
     "btn_hover":       "#f2f4f6",

@@ -60,35 +60,96 @@ class ModuleSwitchConfirmationPopup:
         self._create_dialog()
 
     def _create_dialog(self):
-        d = ThemedDialog(self._parent, "Module Switch Confirmation",
-                         fonts=self._fonts, palette=self.PALETTE, size=(400, 200),
-                         header_text="  Module Switch Confirmation  ",
-                         body_margins=(20, 20, 20, 20))
+        d = ThemedDialog(
+            self._parent,
+            "Module Switch Confirmation",
+            fonts=self._fonts,
+            palette=self.PALETTE,
+            size=(400, 200),
+            header_text="  Module Switch Confirmation  ",
+            body_margins=(20, 20, 20, 20),
+        )
         self._dialog = d
 
-        msg = QLabel(f"Do you want to switch {self._current_module} to {self._target_module}?")
-        msg.setFont(pick_font(self._fonts, "ui_b", size=11, bold=True))
+        # Main message
+        msg = QLabel(
+            f"Do you want to switch "
+            f"{self._current_module} to {self._target_module}?"
+        )
+        msg.setFont(
+            pick_font(
+                self._fonts,
+                "ui_b",
+                size=11,
+                bold=True,
+            )
+        )
         msg.setWordWrap(True)
         msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         d.body_layout.addWidget(msg)
         d.body_layout.addSpacing(10)
 
+        # Subtext
         sub = QLabel(self.SUBTEXT)
-        sub.setFont(pick_font(self._fonts, "sm", size=9))
+        sub.setFont(
+            pick_font(
+                self._fonts,
+                "sm",
+                size=9,
+            )
+        )
         sub.setWordWrap(True)
-        sub.setStyleSheet(f"color:{self.PALETTE['text_dim']}; background:transparent;")
+        sub.setStyleSheet(
+            f"color:{self.PALETTE['text_dim']}; "
+            "background:transparent;"
+        )
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         d.body_layout.addWidget(sub)
         d.body_layout.addSpacing(20)
         d.body_layout.addStretch(1)
 
+        # ------------------------------------------------------------------
+        # Yes / No buttons
+        # Center the entire button group horizontally
+        # ------------------------------------------------------------------
         row = QHBoxLayout()
         row.setSpacing(10)
-        ub = pick_font(self._fonts, "ui_b", size=10, bold=True)
+
+        ub = pick_font(
+            self._fonts,
+            "ui_b",
+            size=10,
+            bold=True,
+        )
+
         from qt_common import make_button
-        row.addWidget(make_button("Yes", self._on_yes, "primary", ub, d.P, pad="8px 24px"))
-        row.addWidget(make_button("No", self._on_no, "normal", ub, d.P, pad="8px 24px"))
+
+        yes_btn = make_button(
+            "Yes",
+            self._on_yes,
+            "primary",
+            ub,
+            d.P,
+            pad="8px 24px",
+        )
+
+        no_btn = make_button(
+            "No",
+            self._on_no,
+            "normal",
+            ub,
+            d.P,
+            pad="8px 24px",
+        )
+
+        # Add stretch on BOTH sides so buttons are centered
         row.addStretch(1)
+        row.addWidget(yes_btn)
+        row.addWidget(no_btn)
+        row.addStretch(1)
+
         d.body_layout.addLayout(row)
 
         # Closing the window with the ✕ counts as "No"
@@ -97,24 +158,33 @@ class ModuleSwitchConfirmationPopup:
     def _on_yes(self):
         """Handle Yes button click."""
         self._confirmed = True
+
         if self._on_confirm:
             self._on_confirm(True)
+
         self._dialog.done(1)
 
     def _on_no(self):
         """Handle No button click."""
         self._confirmed = False
+
         if self._on_confirm:
             self._on_confirm(False)
+
         self._dialog.done(1)
 
     def _on_rejected(self):
-        # Esc / window-close: dismiss without invoking the callback
-        # (the tkinter version had no handler for this either).
+        """
+        Handle Esc / window-close.
+
+        Dismiss without invoking the callback.
+        """
         self._confirmed = False
 
     def show(self):
-        """Display the dialog (modal) and return whether the user confirmed."""
+        """
+        Display the dialog (modal) and return whether the user confirmed.
+        """
         self._dialog.show_modal()
         return self._confirmed
 
@@ -129,7 +199,11 @@ if __name__ == "__main__":
     app = ensure_qapp()
 
     popup = ModuleSwitchConfirmationPopup(
-        None, make_fonts(), "3000/12M/DIS", "3000/6M",
+        None,
+        make_fonts(),
+        "3000/12M/DIS",
+        "3000/6M",
         lambda c: print(f"Confirmed: {c}"),
     )
+
     print(f"Result: {popup.show()}")
