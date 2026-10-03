@@ -1,9 +1,9 @@
 """
 relay_config.py — VMS 3000 Relay Configuration Dialog
 Classic-style relay configuration dialog, matching the legacy VMS 3000
-"Relay Configuration" screen exactly:
+"Relay Configuration" screen:
   - Rack Type / Config ID / Relay Slot header
-  - Available Slots rack graphic (10 module slots, selected slot highlighted)
+  - Available Slots rack graphic (11 module slots, selected slot highlighted)
   - Available Monitor channels / Alarms list
   - Logic keypad: And(*), Or(+), (, ), Enter, <-, CLR, Copy  + percent readout
   - Standard Relay Association: channel dropdown, Active / Latching Relay,
@@ -13,14 +13,21 @@ Classic-style relay configuration dialog, matching the legacy VMS 3000
   - Bottom bar: Ok, Point Names, Cancel, Print, Help, VMS 3000 badge
 """
 
-import tkinter as tk
-from tkinter import ttk
-import tkinter.font as tkfont
-import sys
 import os
-from PIL import Image, ImageTk
+import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..")))
+
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QTextCursor
+from PyQt6.QtWidgets import (
+    QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
+    QLabel, QListWidget, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout,
+    QWidget,
+)
+
+from qt_common import center_on_parent, checkbox_qss, raised_button, scaled_pixmap
 
 # ── Classic "Windows Classic" gray theme, matching the reference screenshot ──
 # Falls back to this if the project theme.py isn't available / doesn't define
@@ -32,7 +39,7 @@ except Exception:
     _PROJECT_T = {}
 
 CLASSIC = {
-    "win_bg":       "#dbe4f0",   # light blue-gray dialog face (matches reference photo)
+    "win_bg":       "#dbe4f0",   # light blue-gray dialog face
     "group_bg":     "#dbe4f0",
     "field_bg":     "#ffffff",
     "text":         "#000000",
@@ -46,7 +53,7 @@ CLASSIC = {
     "slot_dark":    "#0a2a52",
     "slot_mid":     "#1c4d82",
     "slot_light":   "#3f7ab5",
-    "slot_selected":"#79b8e8",
+    "slot_selected": "#79b8e8",
     "led_green":    "#3fdc5a",
     "led_yellow":   "#e8d23f",
     "lcd_bg":       "#0b0f14",
@@ -56,58 +63,153 @@ T = {**CLASSIC, **{k: v for k, v in _PROJECT_T.items() if k not in CLASSIC}}
 FONT_NAME = "MS Sans Serif"
 
 
+def _font(size=8, bold=False, italic=False) -> QFont:
+    f = QFont(FONT_NAME)
+    f.setPointSize(size)
+    f.setBold(bold)
+    f.setItalic(italic)
+    return f
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Classic bevel helpers
 # ══════════════════════════════════════════════════════════════════════════
 
-def sunken_frame(parent, **kw):
+def sunken_frame() -> QFrame:
     """A frame with a classic sunken (etched-in) border."""
-    f = tk.Frame(parent, bg=T["win_bg"], bd=2, relief="sunken", **kw)
+    f = QFrame()
+    f.setObjectName("sunkenFrame")
+    f.setStyleSheet(f"QFrame#sunkenFrame {{ background:{T['field_bg']};"
+                    f" border:2px inset {T['border_dark']}; }}")
     return f
 
 
-def group_box(parent, title, font):
-    """Classic Windows GroupBox: an etched (sunken) double-line border with a
-    title label cut into the top-left of the border. Returns the inner
-    content frame."""
-    outer = tk.Frame(parent, bg=T["win_bg"])
-
-    # Reserve space ABOVE the border for the title label. Previously the
-    # label was placed at y=0, anchor="w" (vertically centered on the
-    # border line) which put half its height above the outer frame's own
-    # top edge — outside the parent's drawable area — so headings like
-    # "Available Slots" / "Standard Relay Association" were clipped and
-    # barely legible. Now the border starts a few pixels lower and the
-    # label is anchored "nw" at y=0, so the full heading is always shown.
-    label_clear = max(14, font.metrics("linespace"))
-    dark = tk.Frame(outer, bg=T["border_dark"])
-    dark.pack(fill="both", expand=True, pady=(label_clear // 2, 0))
-    light = tk.Frame(dark, bg=T["border_light"])
-    light.pack(fill="both", expand=True, padx=(0, 1), pady=(0, 1))
-    inner = tk.Frame(light, bg=T["win_bg"])
-    inner.pack(fill="both", expand=True, padx=1, pady=1)
-
-    content = tk.Frame(inner, bg=T["win_bg"])
-    content.pack(fill="both", expand=True, padx=8, pady=(10, 8))
-
-    # Title label sits on top of the border, with a background patch behind
-    # it so the border line doesn't show through the text.
-    lbl = tk.Label(outer, text=title, font=font, bg=T["win_bg"], fg=T["text"], padx=4)
-    lbl.place(x=8, y=0, anchor="nw")
-
-    return outer, content
+def group_box(title, font) -> tuple:
+    """
+    Classic Windows GroupBox: an etched border with a title cut into the
+    top-left. Returns (group_widget, content_layout).
+    """
+    g = QGroupBox(title)
+    g.setFont(font)
+    g.setStyleSheet(f"""
+        QGroupBox {{
+            background:{T['win_bg']};
+            border:1px solid {T['border_dark']};
+            margin-top:8px; padding:12px 8px 8px 8px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin; subcontrol-position: top left;
+            left:8px; padding:0 4px; color:{T['text']}; background:{T['win_bg']};
+        }}
+    """)
+    lay = QVBoxLayout(g)
+    lay.setContentsMargins(8, 10, 8, 8)
+    return g, lay
 
 
-def classic_button(parent, text, command, font, width=None, enabled=True):
+def classic_button(text, command, font, width=None, enabled=True) -> QPushButton:
     """A raised classic beveled button."""
-    b = tk.Button(
-        parent, text=text, command=command, font=font,
-        bg=T["btn_face"], fg=T["text"], activebackground=T["btn_hover"],
-        relief="raised", bd=2, padx=6, pady=2,
-        highlightthickness=0, width=width,
-        state="normal" if enabled else "disabled",
+    return raised_button(
+        text, command, width_chars=width, enabled=enabled, font=font,
+        colors={"btn_face": T["btn_face"], "btn_hover": T["btn_hover"],
+                "btn_press": "#c3cfdf", "btn_border": T["border_dark"],
+                "text": T["text"]},
     )
-    return b
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Available Slots rack graphic
+# ══════════════════════════════════════════════════════════════════════════
+
+class SlotsRackWidget(QWidget):
+    """Painted rack of module slots; click a slot to select it."""
+
+    PAD = 4
+    HEIGHT = 168
+    NUM_Y = 12                  # slot-number row, fully inside the top edge
+    TOP_Y = 26                  # module image top
+    NAME_OFFSET = 10            # module short-name row, from bottom
+
+    def __init__(self, dialog_ref, n_slots, f_bold, f_small, parent=None):
+        super().__init__(parent)
+        self._dlg = dialog_ref
+        self._n = n_slots
+        self._f_bold = f_bold
+        self._f_small = f_small
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _slot_w(self):
+        return (self.width() - 2 * self.PAD) / self._n
+
+    def mousePressEvent(self, e):
+        if self.width() < 10:
+            return
+        i = int((e.position().x() - self.PAD) // self._slot_w()) + 1
+        i = max(1, min(self._n, i))
+        self._dlg._on_slot_selected(i)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(T["field_bg"]))
+        p.setPen(QPen(QColor(T["border_dark"]), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(0, 0, self.width() - 1, self.height() - 1)
+
+        width = self.width() if self.width() >= 10 else 480
+        n, pad = self._n, self.PAD
+        slot_w = (width - 2 * pad) / n
+        bot_y = self.HEIGHT - 22
+        name_y = self.HEIGHT - self.NAME_OFFSET
+        selected = self._dlg.config_data["selected_slot"]
+
+        # Every slot is drawn at the SAME size — no enlarge/zoom for the
+        # selected slot. Selection is shown only via a highlight border.
+        for i in range(1, n + 1):
+            x0 = pad + (i - 1) * slot_w
+            x1 = x0 + slot_w - 2
+            cx = (x0 + x1) / 2
+            is_selected = (i == selected)
+
+            # real module image, scaled to FIT the slot (aspect kept)
+            module = self._dlg._rack_config.get(f"0_{i}")
+            filename = self._dlg._resolve_module_image(module)
+            box_w = max(1, (x1 - x0) - 4)
+            box_h = max(1, (bot_y - self.TOP_Y) - 4)
+            pm = scaled_pixmap(filename, box_w, box_h, keep_aspect=True)
+            if pm is not None:
+                cy = (self.TOP_Y + bot_y) / 2
+                p.drawPixmap(int(cx - pm.width() / 2), int(cy - pm.height() / 2), pm)
+
+            if is_selected:
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.setPen(QPen(QColor("#ffffff"), 2))
+                p.drawRect(QRectF(x0, self.TOP_Y, x1 - x0, bot_y - self.TOP_Y))
+                p.setPen(QPen(QColor(T["accent"]), 1))
+                p.drawRect(QRectF(x0 - 1, self.TOP_Y - 1, x1 - x0 + 2, bot_y - self.TOP_Y + 2))
+
+            # Slot number: drawn LAST with a high-contrast chip behind it
+            num_text = str(i)
+            fm = QFontMetrics(self._f_bold)
+            chip_w = max(14, fm.horizontalAdvance(num_text) + 8)
+            chip_h = fm.height() + 2
+            p.setPen(QPen(QColor(T["border_dark"]), 1))
+            p.setBrush(QColor("#fdf6c9"))
+            p.drawRect(QRectF(cx - chip_w / 2, self.NUM_Y - chip_h / 2, chip_w, chip_h))
+            p.setFont(self._f_bold)
+            p.setPen(QColor("#000000"))
+            p.drawText(QRectF(cx - chip_w / 2, self.NUM_Y - chip_h / 2, chip_w, chip_h),
+                       Qt.AlignmentFlag.AlignCenter, num_text)
+
+            # Module short-name, shown under the image
+            p.setFont(self._f_small)
+            p.setPen(QColor(T["text_dim"]))
+            fm2 = QFontMetrics(self._f_small)
+            p.drawText(QRectF(cx - slot_w / 2, name_y - fm2.height() / 2, slot_w, fm2.height()),
+                       Qt.AlignmentFlag.AlignCenter,
+                       self._dlg._short_module_label(module))
+        p.end()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -146,106 +248,98 @@ class RelayConfigDialog:
 
     # ──────────────────────────────────────────────────────────────────
     def show(self):
-        self._dialog = tk.Toplevel(self._parent)
-        self._dialog.title("Relay Configuration")
-        self._dialog.geometry("700x600")
-        self._dialog.minsize(680, 520)
-        self._dialog.configure(bg=T["win_bg"])
-        self._dialog.resizable(True, True)
+        d = QDialog(self._parent)
+        self._dialog = d
+        d.setObjectName("relayDlg")
+        d.setWindowTitle("Relay Configuration")
+        d.setMinimumSize(680, 520)
+        d.resize(700, 600)
+        d.setModal(True)
+        d.setStyleSheet(f"QDialog#relayDlg {{ background:{T['win_bg']}; }}"
+                        f"QLabel {{ background:transparent; color:{T['text']}; }}"
+                        + checkbox_qss(T['text']))
 
-        self._dialog.transient(self._parent)
-        self._dialog.grab_set()
-
-        self._f_norm  = tkfont.Font(family=FONT_NAME, size=8)
-        self._f_bold  = tkfont.Font(family=FONT_NAME, size=8, weight="bold")
-        self._f_small = tkfont.Font(family=FONT_NAME, size=7)
-        self._f_group = tkfont.Font(family=FONT_NAME, size=8, weight="bold")
-        self._f_vms   = tkfont.Font(family=FONT_NAME, size=13, weight="bold", slant="italic")
+        self._f_norm = _font(8)
+        self._f_bold = _font(8, bold=True)
+        self._f_small = _font(7)
+        self._f_group = _font(8, bold=True)
+        self._f_vms = _font(13, bold=True, italic=True)
 
         self._build_ui()
 
-        self._dialog.update_idletasks()
-        x = self._parent.winfo_x() + (self._parent.winfo_width() - self._dialog.winfo_width()) // 2
-        y = self._parent.winfo_y() + (self._parent.winfo_height() - self._dialog.winfo_height()) // 2
-        self._dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
-
-    # ──────────────────────────────────────────────────────────────────
-    def _build_ui(self):
-        main = tk.Frame(self._dialog, bg=T["win_bg"], padx=8, pady=8)
-        main.pack(fill="both", expand=True)
-
-        # ═══════════════════ Header: Rack Type / Config ID / Relay Slot ════
-        header = tk.Frame(main, bg=T["win_bg"])
-        header.pack(fill="x", pady=(0, 8))
-
-        tk.Label(header, text="Rack Type:", font=self._f_bold,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left")
-        tk.Label(header, text=self._rack_type, font=self._f_norm,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left", padx=(4, 24))
-
-        tk.Label(header, text="Config ID:", font=self._f_bold,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left")
-        tk.Label(header, text=self._config_id or "", font=self._f_norm,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left", padx=(4, 24))
-
-        tk.Label(header, text="Relay Slot:", font=self._f_bold,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left")
-        tk.Label(header, text=str(self._slot_num), font=self._f_norm,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left", padx=(4, 0))
-
-        # ═══════════════════ Top split: Slots | Monitor channels ═══════════
-        # In the reference dialog, "Available Slots" is the wider left box
-        # (rack graphic + logic keypad side-by-side, INSIDE the same box),
-        # and "Available Monitor channels/ Alarms" is the narrower right box.
-        top_split = tk.Frame(main, bg=T["win_bg"])
-        top_split.pack(fill="both", expand=True)
-        top_split.grid_columnconfigure(0, weight=58, minsize=380)
-        top_split.grid_columnconfigure(1, weight=42, minsize=240)
-        top_split.grid_rowconfigure(0, weight=1, minsize=190)
-
-        # ---- Left: Available Slots (rack graphic only) ----
-        slots_outer, slots_body = group_box(top_split, "Available Slots", self._f_group)
-        slots_outer.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        self._build_slots_rack(slots_body)
-
-        # ---- Right: Available Monitor channels/ Alarms ----
-        mon_outer, mon_body = group_box(top_split, "Available Monitor channels/ Alarms", self._f_group)
-        mon_outer.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        
-        # Monitor channels list
-        self._build_monitor_list(mon_body)
-        
-        # Logic keypad and buttons below the list
-        keypad_frame = tk.Frame(mon_body, bg=T["win_bg"])
-        keypad_frame.pack(fill="x", pady=(8, 0))
-        self._build_keypad(keypad_frame)
-
-        # Now that both the rack graphic and the monitor list exist, show the
-        # Available Monitor channels/Alarms for whichever slot starts selected
-        # (e.g. the 3000/12M/DIS slot), matching the reference behaviour.
+        # Every widget now exists, so selecting the initial slot can fill the
+        # monitor list, the channel dropdown and the Alarm Drive Logic box.
         self._on_slot_selected(self.config_data["selected_slot"])
 
+        center_on_parent(d, self._parent)
+        d.exec()
+
+    # ──────────────────────────────────────────────────────────────────
+    def _label(self, text, bold=False):
+        l = QLabel(text)
+        l.setFont(self._f_bold if bold else self._f_norm)
+        return l
+
+    def _build_ui(self):
+        main = QVBoxLayout(self._dialog)
+        main.setContentsMargins(8, 8, 8, 8)
+
+        # ═══════════════════ Header: Rack Type / Config ID / Relay Slot ════
+        header = QHBoxLayout()
+        header.addWidget(self._label("Rack Type:", True))
+        header.addSpacing(4)
+        header.addWidget(self._label(self._rack_type))
+        header.addSpacing(24)
+        header.addWidget(self._label("Config ID:", True))
+        header.addSpacing(4)
+        header.addWidget(self._label(self._config_id or ""))
+        header.addSpacing(24)
+        header.addWidget(self._label("Relay Slot:", True))
+        header.addSpacing(4)
+        header.addWidget(self._label(str(self._slot_num)))
+        header.addStretch(1)
+        main.addLayout(header)
+        main.addSpacing(8)
+
+        # ═══════════════════ Top split: Slots | Monitor channels ═══════════
+        top_split = QHBoxLayout()
+        top_split.setSpacing(12)
+        main.addLayout(top_split, 1)
+
+        slots_group, slots_lay = group_box("Available Slots", self._f_group)
+        top_split.addWidget(slots_group, 58)
+        self._build_slots_rack(slots_lay)
+        slots_lay.addStretch(1)
+
+        mon_group, mon_lay = group_box("Available Monitor channels/ Alarms", self._f_group)
+        top_split.addWidget(mon_group, 42)
+        self._build_monitor_list(mon_lay)
+        mon_lay.addSpacing(8)
+        self._build_keypad(mon_lay)
+
         # ═══════════════════ Bottom split: Association | Alarm Logic ═══════
-        bottom_split = tk.Frame(main, bg=T["win_bg"])
-        bottom_split.pack(fill="both", expand=True, pady=(8, 0))
+        bottom_split = QHBoxLayout()
+        bottom_split.setSpacing(12)
+        main.addSpacing(8)
+        main.addLayout(bottom_split, 1)
 
-        assoc_outer, assoc_body = group_box(bottom_split, "Standard Relay Association", self._f_group)
-        assoc_outer.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        self._build_relay_association(assoc_body)
+        assoc_group, assoc_lay = group_box("Standard Relay Association", self._f_group)
+        bottom_split.addWidget(assoc_group, 1)
+        self._build_relay_association(assoc_lay)
 
-        logic_outer, logic_body = group_box(bottom_split, "Alarm Drive Logic", self._f_group)
-        logic_outer.pack(side="left", fill="both", expand=True, padx=(6, 0))
-        self._build_alarm_drive_logic(logic_body)
+        logic_group, logic_lay = group_box("Alarm Drive Logic", self._f_group)
+        bottom_split.addWidget(logic_group, 1)
+        self._build_alarm_drive_logic(logic_lay)
 
         # ═══════════════════ NE/NDE Switch Status ═══════════════════════
-        status_row = tk.Frame(main, bg=T["win_bg"])
-        status_row.pack(fill="x", pady=(8, 6))
-
-        tk.Label(status_row, text="Relay NE/NDE Switch Status:", font=self._f_bold,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left")
-        self._status_value = tk.Label(status_row, textvariable=None, text="",
-                                       font=self._f_norm, bg=T["win_bg"], fg=T["text"])
-        self._status_value.pack(side="left", padx=(6, 0))
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 8, 0, 6)
+        status_row.addWidget(self._label("Relay NE/NDE Switch Status:", True))
+        status_row.addSpacing(6)
+        self._status_value = self._label("")
+        status_row.addWidget(self._status_value)
+        status_row.addStretch(1)
+        main.addLayout(status_row)
 
         # ═══════════════════ Bottom button bar ═══════════════════════
         self._build_bottom_bar(main)
@@ -253,124 +347,35 @@ class RelayConfigDialog:
     # ──────────────────────────────────────────────────────────────────
     #  Available Slots rack graphic
     # ──────────────────────────────────────────────────────────────────
-    def _build_slots_rack(self, parent):
-        canvas_h = 168
-        canvas = tk.Canvas(parent, height=canvas_h, bg=T["field_bg"],
-                            highlightthickness=1, highlightbackground=T["border_dark"])
-        canvas.pack(fill="x")
-        self._slots_canvas = canvas
-        self._slot_photos = {}  # keep PhotoImage refs alive (avoid GC)
+    def _build_slots_rack(self, parent_layout):
+        self._slots_widget = SlotsRackWidget(
+            self, self.NUM_SLOTS, self._f_bold, self._f_small)
+        parent_layout.addWidget(self._slots_widget)
 
-        n = self.NUM_SLOTS
-        pad = 4
-        num_y = 12          # slot-number row, fully inside the canvas top edge
-        top_y = 26           # module image top
-        bot_y = canvas_h - 22  # module image bottom (room left for name row below)
-        name_y = canvas_h - 10  # module short-name row, under the image
-
-        self._rack_n = n
-        self._rack_pad = pad
-
-        def redraw(event=None):
-            canvas.delete("all")
-            width = canvas.winfo_width()
-            if width < 10:
-                width = 480
-            slot_w = (width - 2 * pad) / n
-            selected = self.config_data["selected_slot"]
-
-            # Every slot is drawn at the SAME size — no enlarge/zoom for the
-            # selected slot. Selection is shown only via a highlight border.
-            for i in range(1, n + 1):
-                x0 = pad + (i - 1) * slot_w
-                x1 = x0 + slot_w - 2
-                cx = (x0 + x1) / 2
-                is_selected = (i == selected)
-
-                # ── real module image, scaled to FIT the slot (aspect kept,
-                #    not stretched/zoomed) — reflects whatever is actually
-                #    assigned to this slot in the live rack configuration. ──
-                module = self._rack_config.get(f"0_{i}")
-                filename = self._resolve_module_image(module)
-                box_w = max(1, (x1 - x0) - 4)
-                box_h = max(1, (bot_y - top_y) - 4)
-                photo = self._load_fit_photo(filename, box_w, box_h)
-
-                if photo is not None:
-                    cy = (top_y + bot_y) / 2
-                    canvas.create_image(cx, cy, image=photo, anchor="center")
-                    self._slot_photos[i] = photo
-
-                if is_selected:
-                    canvas.create_rectangle(x0, top_y, x1, bot_y, outline="#ffffff", width=2)
-                    canvas.create_rectangle(x0 - 1, top_y - 1, x1 + 1, bot_y + 1,
-                                             outline=T["accent"], width=1)
-
-                # ── Slot number: drawn LAST (on top of the module image) with
-                #    a high-contrast chip behind it, so it is always readable
-                #    instead of being covered/washed out by the module photo. ──
-                num_text = str(i)
-                chip_w = max(14, self._f_bold.measure(num_text) + 8)
-                chip_h = self._f_bold.metrics("linespace") + 2
-                canvas.create_rectangle(
-                    cx - chip_w / 2, num_y - chip_h / 2,
-                    cx + chip_w / 2, num_y + chip_h / 2,
-                    fill="#fdf6c9", outline=T["border_dark"],
-                )
-                canvas.create_text(cx, num_y, text=num_text,
-                                    font=self._f_bold, fill="#000000")
-
-                # ── Module short-name, shown under the image so the actual
-                #    installed module type is always identified at a glance
-                #    (e.g. "DIS", "6M", "RLY", "—") — matches the reference
-                #    rack's slot labelling. ──
-                short_name = self._short_module_label(module)
-                canvas.create_text(cx, name_y, text=short_name,
-                                    font=self._f_small, fill=T["text_dim"])
-
-        canvas.bind("<Configure>", redraw)
-        canvas.bind("<Button-1>", self._on_rack_click)
-        canvas.configure(cursor="hand2")
-        self._redraw_slots_rack = redraw
-        self._dialog.after(50, redraw)
-
-    def _on_rack_click(self, event):
-        """Clicking a slot in the Available Slots graphic selects it —
-        highlights it and refreshes the Available Monitor channels/Alarms
-        list for whatever module is installed there (e.g. 3000/12M/DIS)."""
-        canvas = self._slots_canvas
-        width = canvas.winfo_width()
-        if width < 10:
-            return
-        n = self._rack_n
-        pad = self._rack_pad
-        slot_w = (width - 2 * pad) / n
-        i = int((event.x - pad) // slot_w) + 1
-        i = max(1, min(n, i))
-        self._on_slot_selected(i)
+    def _redraw_slots_rack(self):
+        if hasattr(self, "_slots_widget"):
+            self._slots_widget.update()
 
     def _on_slot_selected(self, slot_num):
         """Select a slot in the rack graphic and populate the Available
         Monitor channels/Alarms list for the module installed there."""
         self.config_data["selected_slot"] = slot_num
-
-        if hasattr(self, "_redraw_slots_rack"):
-            self._redraw_slots_rack()
+        self._redraw_slots_rack()
 
         module = self._rack_config.get(f"0_{slot_num}")
         entries = self._monitor_entries_for_slot(slot_num, module)
         self.config_data["monitor_channels"] = entries
 
         if hasattr(self, "_monitor_listbox"):
-            self._monitor_listbox.delete(0, "end")
-            for entry in entries:
-                self._monitor_listbox.insert("end", entry)
-        
+            self._monitor_listbox.blockSignals(True)
+            self._monitor_listbox.clear()
+            self._monitor_listbox.addItems(entries)
+            self._monitor_listbox.blockSignals(False)
+
         # Update channel association dropdown based on available channels
         self._update_channel_association_dropdown(module)
-        
+
         # Auto-populate Alarm Drive Logic when a module with channels is selected
-        # and there's a display added in rack
         if module and self._channel_count_for_module(module) > 0:
             self._auto_populate_alarm_logic(slot_num, module)
 
@@ -390,14 +395,12 @@ class RelayConfigDialog:
         return 0
 
     def _monitor_entries_for_slot(self, slot_num, module):
-        """Build the Available Monitor channels/Alarms entries for a slot,
-        matching the reference naming exactly:
+        """Build the Available Monitor channels/Alarms entries for a slot:
           S{slot}C##A1 (Slot {slot} Any Active Alert)
           S{slot}C##A2 (Slot {slot} Any Active Danger)
           S{slot}C{ch:02d}A1 (Slot {slot} Channel {ch} Alert)
           S{slot}C{ch:02d}A2 (Slot {slot} Channel {ch} Danger)
-        Returns an empty list for slots with no monitored channels (empty
-        slots, Relay modules, etc.)."""
+        Returns an empty list for slots with no monitored channels."""
         n_channels = self._channel_count_for_module(module)
         if n_channels <= 0:
             return []
@@ -413,9 +416,7 @@ class RelayConfigDialog:
 
     @staticmethod
     def _short_module_label(module):
-        """Short, always-legible label shown under each slot's image in the
-        Available Slots rack graphic — identifies the installed module type
-        at a glance (e.g. 'DIS', '6M', 'RLY', '—' for empty)."""
+        """Short label under each slot's image ('DIS', '6M', 'RLY', '—' ...)."""
         if not module or module == "No Modules":
             return "\u2014"
         if module == "3000/12M/DIS":
@@ -431,8 +432,7 @@ class RelayConfigDialog:
 
     @staticmethod
     def _resolve_module_image(module):
-        """Map an assigned module name to its real rack image filename
-        (same images used in the main rack view)."""
+        """Map an assigned module name to its rack image filename."""
         if not module or module == "No Modules":
             return "NO_Module.jpg"
         if module == "3000/12M/DIS":
@@ -444,337 +444,293 @@ class RelayConfigDialog:
             return "Relay_Module.jpg"
         return "NO_Module.jpg"
 
-    def _load_fit_photo(self, filename, box_w, box_h):
-        """Load src/images/<filename> and scale it to FIT inside
-        (box_w x box_h) preserving aspect ratio — contain, not stretch/zoom."""
-        box_w = max(1, int(round(box_w)))
-        box_h = max(1, int(round(box_h)))
-
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        img_path = os.path.join(base_dir, "..", "images", filename)
-        if not os.path.exists(img_path):
-            return None
-
-        try:
-            img = Image.open(img_path).convert("RGB")
-            src_w, src_h = img.size
-            scale = min(box_w / src_w, box_h / src_h)
-            new_w = max(1, int(round(src_w * scale)))
-            new_h = max(1, int(round(src_h * scale)))
-            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-            return ImageTk.PhotoImage(img)
-        except Exception:
-            return None
-
     # ──────────────────────────────────────────────────────────────────
     #  Logic keypad: And(*) Or(+) ( ) Enter <- CLR Copy  + % readout
     # ──────────────────────────────────────────────────────────────────
-    def _build_keypad(self, parent):
+    def _build_keypad(self, parent_layout):
         def add(txt):
-            # Insert directly into the Alarm Drive Logic box at the cursor,
-            # so the keypad's And/Or/(/) presses are visibly reflected there
-            # (matching the reference behaviour) rather than only being
-            # tracked in an invisible internal string.
+            # Insert directly into the Alarm Drive Logic box at the cursor
             self._insert_logic_text(txt)
 
         btn_font = self._f_norm
-        
-        # Main keypad container
-        keypad_container = tk.Frame(parent, bg=T["win_bg"])
-        keypad_container.pack(fill="x")
-        
+        box = QVBoxLayout()
+        box.setSpacing(4)
+        parent_layout.addLayout(box)
+
         # Top row: And [*] Or [+]
-        top_row = tk.Frame(keypad_container, bg=T["win_bg"])
-        top_row.pack(fill="x", pady=2)
-        classic_button(top_row, "And [*]", lambda: add("*"), btn_font, width=10).pack(side="left", padx=2)
-        classic_button(top_row, "Or [+]", lambda: add("+"), btn_font, width=10).pack(side="left", padx=2)
-        
+        r1 = QHBoxLayout()
+        r1.addWidget(classic_button("And [*]", lambda: add("*"), btn_font, width=10))
+        r1.addWidget(classic_button("Or [+]", lambda: add("+"), btn_font, width=10))
+        r1.addStretch(1)
+        box.addLayout(r1)
+
         # Second row: ( ) Enter
-        mid_row = tk.Frame(keypad_container, bg=T["win_bg"])
-        mid_row.pack(fill="x", pady=2)
-        classic_button(mid_row, "(", lambda: add("("), btn_font, width=6).pack(side="left", padx=2)
-        classic_button(mid_row, ")", lambda: add(")"), btn_font, width=6).pack(side="left", padx=2)
-        classic_button(mid_row, "Enter", self._on_logic_enter, self._f_bold, width=8).pack(side="left", padx=2)
-        
+        r2 = QHBoxLayout()
+        r2.addWidget(classic_button("(", lambda: add("("), btn_font, width=6))
+        r2.addWidget(classic_button(")", lambda: add(")"), btn_font, width=6))
+        r2.addWidget(classic_button("Enter", self._on_logic_enter, self._f_bold, width=8))
+        r2.addStretch(1)
+        box.addLayout(r2)
+
         # Third row: <- CLR Copy
-        bot_row = tk.Frame(keypad_container, bg=T["win_bg"])
-        bot_row.pack(fill="x", pady=2)
-        classic_button(bot_row, "<-", self._on_logic_backspace, btn_font, width=6).pack(side="left", padx=2)
-        classic_button(bot_row, "CLR", self._on_logic_clear, btn_font, width=6).pack(side="left", padx=2)
-        classic_button(bot_row, "Copy", self._on_copy, btn_font, width=6).pack(side="left", padx=2)
-        
+        r3 = QHBoxLayout()
+        r3.addWidget(classic_button("<-", self._on_logic_backspace, btn_font, width=6))
+        r3.addWidget(classic_button("CLR", self._on_logic_clear, btn_font, width=6))
+        r3.addWidget(classic_button("Copy", self._on_copy, btn_font, width=6))
+        r3.addStretch(1)
+        box.addLayout(r3)
+
         # Percentage readout at bottom
-        pct_row = tk.Frame(keypad_container, bg=T["win_bg"])
-        pct_row.pack(fill="x", pady=(6, 0))
-
-        track = tk.Frame(pct_row, bg=T["field_bg"], bd=2, relief="sunken", height=8)
-        track.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        track.pack_propagate(False)
-
-        self._pct_var = tk.StringVar(value=f'{self.config_data["logic_percent"]}%')
-        tk.Label(pct_row, textvariable=self._pct_var, font=self._f_small,
-                 bg=T["win_bg"], fg=T["text"]).pack(side="left")
+        pct = QHBoxLayout()
+        pct.setContentsMargins(0, 6, 0, 0)
+        track = QFrame()
+        track.setFixedHeight(12)
+        track.setStyleSheet(f"background:{T['field_bg']}; border:2px inset {T['border_dark']};")
+        pct.addWidget(track, 1)
+        pct.addSpacing(6)
+        self._pct_label = QLabel(f'{self.config_data["logic_percent"]}%')
+        self._pct_label.setFont(self._f_small)
+        pct.addWidget(self._pct_label)
+        box.addLayout(pct)
 
     # ── Alarm Drive Logic text helpers — the logic box is the single
     #    visible source of truth; the keypad, the monitor-channel list,
     #    and Enter/backspace/CLR all read from and write to it directly. ──
+    def _logic_text(self):
+        return self._alarm_logic_text.toPlainText()
+
     def _insert_logic_text(self, text):
-        """Insert text into the Alarm Drive Logic box at the cursor (or at
-        the end if the box doesn't have focus yet), then sync config_data."""
+        """Insert text into the Alarm Drive Logic box at the cursor, then
+        sync config_data."""
         widget = getattr(self, "_alarm_logic_text", None)
         if widget is None:
             self.config_data["logic_expression"] += text
             return
-        try:
-            widget.insert("insert", text)
-        except tk.TclError:
-            widget.insert("end", text)
-        widget.see("insert")
-        widget.focus_set()
-        self.config_data["logic_expression"] = widget.get("1.0", "end-1c")
+        widget.insertPlainText(text)
+        widget.ensureCursorVisible()
+        widget.setFocus()
+        self.config_data["logic_expression"] = self._logic_text()
 
     def _on_logic_enter(self):
         widget = getattr(self, "_alarm_logic_text", None)
         if widget is not None:
-            self.config_data["logic_expression"] = widget.get("1.0", "end-1c")
+            self.config_data["logic_expression"] = self._logic_text()
         print(f"Enter logic expression: {self.config_data['logic_expression']}")
 
     def _on_logic_backspace(self):
         widget = getattr(self, "_alarm_logic_text", None)
         if widget is not None:
-            widget.delete("insert-1c", "insert")
-            widget.focus_set()
-            self.config_data["logic_expression"] = widget.get("1.0", "end-1c")
+            widget.textCursor().deletePreviousChar()
+            widget.setFocus()
+            self.config_data["logic_expression"] = self._logic_text()
         else:
             self.config_data["logic_expression"] = self.config_data["logic_expression"][:-1]
 
     def _on_logic_clear(self):
         widget = getattr(self, "_alarm_logic_text", None)
         if widget is not None:
-            widget.delete("1.0", "end")
-            widget.focus_set()
+            widget.clear()
+            widget.setFocus()
         self.config_data["logic_expression"] = ""
         self.config_data["logic_percent"] = 0
-        self._pct_var.set("0%")
+        self._pct_label.setText("0%")
 
     # ──────────────────────────────────────────────────────────────────
     #  Available Monitor channels/ Alarms
     # ──────────────────────────────────────────────────────────────────
-    def _build_monitor_list(self, parent):
-        list_frame = sunken_frame(parent)
-        list_frame.pack(fill="both", expand=True)
-
-        scrollbar = tk.Scrollbar(list_frame, orient="vertical")
-        self._monitor_listbox = tk.Listbox(
-            list_frame, font=self._f_norm, bg=T["field_bg"], fg=T["text"],
-            relief="flat", bd=0, selectmode="browse",
-            yscrollcommand=scrollbar.set,
+    def _build_monitor_list(self, parent_layout):
+        lb = QListWidget()
+        lb.setFont(self._f_norm)
+        lb.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        lb.setStyleSheet(
+            f"QListWidget {{ background:{T['field_bg']}; color:{T['text']};"
+            f" border:2px inset {T['border_dark']}; }}"
+            "QListWidget::item:selected { background:#0a246a; color:#ffffff; }"
         )
-        scrollbar.config(command=self._monitor_listbox.yview)
-        scrollbar.pack(side="right", fill="y")
-        self._monitor_listbox.pack(side="left", fill="both", expand=True)
+        lb.addItems(self.config_data["monitor_channels"])
+        lb.itemSelectionChanged.connect(self._on_monitor_channel_select)
+        self._monitor_listbox = lb
+        parent_layout.addWidget(lb, 1)
 
-        self._monitor_listbox.bind("<<ListboxSelect>>", self._on_monitor_channel_select)
-
-        for ch in self.config_data["monitor_channels"]:
-            self._monitor_listbox.insert("end", ch)
-
-    def _on_monitor_channel_select(self, event=None):
+    def _on_monitor_channel_select(self):
         """Selecting a channel/alarm entry (e.g. 'S5C01A1 (Slot 5 Channel 1
         Alert)') inserts just its point code into the Alarm Drive Logic box
-        at the cursor, so building a logic expression from monitor points
-        works the same way as using the And/Or/(/) keypad."""
-        sel = self._monitor_listbox.curselection()
-        if not sel:
+        at the cursor."""
+        items = self._monitor_listbox.selectedItems()
+        if not items:
             return
-        entry = self._monitor_listbox.get(sel[0])
-        code = entry.split(" ", 1)[0]
+        code = items[0].text().split(" ", 1)[0]
         self._insert_logic_text(code)
-
-    def _build_channel_configuration_slots(self, parent):
-        """Channel configuration slots removed - not needed in the simplified UI."""
-        pass
 
     # ──────────────────────────────────────────────────────────────────
     #  Standard Relay Association
     # ──────────────────────────────────────────────────────────────────
-    def _build_relay_association(self, parent):
-        tk.Label(parent, text="Channel Association", font=self._f_norm,
-                 bg=T["win_bg"], fg=T["text"]).pack(anchor="w")
+    def _build_relay_association(self, parent_layout):
+        parent_layout.addWidget(self._label("Channel Association"))
 
-        self._channel_combo = ttk.Combobox(
-            parent, values=[f"Channel {i}" for i in range(1, 9)],
-            font=self._f_norm, state="readonly", width=18,
-        )
-        self._channel_combo.set(self.config_data["channel_association"])
-        self._channel_combo.pack(anchor="w", pady=(2, 8), fill="x")
-        self._channel_combo.bind("<<ComboboxSelected>>", self._on_channel_selected)
+        self._channel_combo = QComboBox()
+        self._channel_combo.setFont(self._f_norm)
+        self._channel_combo.addItems([f"Channel {i}" for i in range(1, 9)])
+        self._channel_combo.setCurrentText(self.config_data["channel_association"])
+        self._channel_combo.setStyleSheet("QComboBox { background:#ffffff; color:#000; padding:2px 4px; }")
+        self._channel_combo.activated.connect(lambda _i: self._on_channel_selected())
+        parent_layout.addWidget(self._channel_combo)
+        parent_layout.addSpacing(6)
 
-        self._active_var = tk.BooleanVar(value=self.config_data["active"])
-        tk.Checkbutton(parent, text="Active", variable=self._active_var,
-                        font=self._f_norm, bg=T["win_bg"], fg=T["text"],
-                        activebackground=T["win_bg"]).pack(anchor="w")
+        self._active_chk = QCheckBox("Active")
+        self._active_chk.setFont(self._f_norm)
+        self._active_chk.setChecked(self.config_data["active"])
+        parent_layout.addWidget(self._active_chk)
 
-        self._latching_var = tk.BooleanVar(value=self.config_data["latching_relay"])
-        tk.Checkbutton(parent, text="Latching Relay", variable=self._latching_var,
-                        font=self._f_norm, bg=T["win_bg"], fg=T["text"],
-                        activebackground=T["win_bg"]).pack(anchor="w")
+        self._latching_chk = QCheckBox("Latching Relay")
+        self._latching_chk.setFont(self._f_norm)
+        self._latching_chk.setChecked(self.config_data["latching_relay"])
+        parent_layout.addWidget(self._latching_chk)
 
-        classic_button(parent, "And Voting Setup", self._on_voting_setup,
-                        self._f_norm).pack(anchor="w", pady=(10, 0), fill="x")
+        parent_layout.addSpacing(8)
+        parent_layout.addWidget(classic_button("And Voting Setup", self._on_voting_setup, self._f_norm))
+        parent_layout.addStretch(1)
 
     def _on_voting_setup(self):
         print(f"And Voting Setup for slot {self._slot_num}")
 
-    def _on_channel_selected(self, event=None):
-        """When a channel is selected in the Channel Association dropdown,
-        populate the Alarm Drive Logic text area with the available monitor
-        channels/alarms for that channel when there's a display added in rack."""
-        selected_channel = self._channel_combo.get()
+    def _logic_for_channel(self, slot_num, channel_num):
+        entries = [
+            f"S{slot_num}C{channel_num:02d}A1 (Slot {slot_num} Channel {channel_num} Alert)",
+            f"S{slot_num}C{channel_num:02d}A2 (Slot {slot_num} Channel {channel_num} Danger)",
+        ]
+        return " + ".join(e.split()[0] for e in entries)
+
+    def _on_channel_selected(self):
+        """When a channel is chosen in the Channel Association dropdown,
+        populate the Alarm Drive Logic text with that channel's points."""
+        selected_channel = self._channel_combo.currentText()
         if not selected_channel:
             return
-        
+
         # Extract channel number from "Channel X" format
         try:
             channel_num = int(selected_channel.split()[-1])
         except (IndexError, ValueError):
             return
-        
-        # Get the selected slot and module
+
         selected_slot = self.config_data["selected_slot"]
         module = self._rack_config.get(f"0_{selected_slot}")
-        
+
         # Only populate if there's a module with channels in the selected slot
         n_channels = self._channel_count_for_module(module)
         if n_channels <= 0 or channel_num > n_channels:
             return
-        
-        # Build the monitor channel entries for the selected channel
-        entries = []
-        # Add Alert and Danger for the specific channel
-        entries.append(f"S{selected_slot}C{channel_num:02d}A1 (Slot {selected_slot} Channel {channel_num} Alert)")
-        entries.append(f"S{selected_slot}C{channel_num:02d}A2 (Slot {selected_slot} Channel {channel_num} Danger)")
-        
-        # Populate the Alarm Drive Logic text area with these entries
-        if hasattr(self, "_alarm_logic_text"):
-            # Clear existing content
-            self._alarm_logic_text.delete("1.0", "end")
-            # Insert the channel entries
-            logic_expression = " + ".join([entry.split()[0] for entry in entries])
-            self._alarm_logic_text.insert("1.0", logic_expression)
-            self.config_data["alarm_drive_logic"] = logic_expression
-            print(f"Populated Alarm Drive Logic for Channel {channel_num}: {logic_expression}")
+
+        logic_expression = self._logic_for_channel(selected_slot, channel_num)
+        self._alarm_logic_text.setPlainText(logic_expression)
+        self.config_data["alarm_drive_logic"] = logic_expression
+        print(f"Populated Alarm Drive Logic for Channel {channel_num}: {logic_expression}")
 
     def _auto_populate_alarm_logic(self, slot_num, module):
-        """Auto-populate the Alarm Drive Logic text area when a module with
-        channels is selected in the rack (display added in rank)."""
+        """Auto-populate the Alarm Drive Logic text when a module with
+        channels is selected in the rack."""
         n_channels = self._channel_count_for_module(module)
         if n_channels <= 0:
             return
-        
-        # Get the currently selected channel from the dropdown
-        selected_channel = self._channel_combo.get()
+
+        selected_channel = self._channel_combo.currentText()
         if not selected_channel:
             return
-        
-        # Extract channel number
+
         try:
             channel_num = int(selected_channel.split()[-1])
         except (IndexError, ValueError):
             channel_num = 1  # Default to channel 1 if parsing fails
-        
+
         # Validate channel number against available channels
         if channel_num > n_channels:
-            channel_num = 1  # Use first available channel if selected is out of range
-        
-        # Build monitor channel entries for the selected channel
-        entries = []
-        entries.append(f"S{slot_num}C{channel_num:02d}A1 (Slot {slot_num} Channel {channel_num} Alert)")
-        entries.append(f"S{slot_num}C{channel_num:02d}A2 (Slot {slot_num} Channel {channel_num} Danger)")
-        
-        # Populate the Alarm Drive Logic text area
-        if hasattr(self, "_alarm_logic_text"):
-            self._alarm_logic_text.delete("1.0", "end")
-            logic_expression = " + ".join([entry.split()[0] for entry in entries])
-            self._alarm_logic_text.insert("1.0", logic_expression)
-            self.config_data["alarm_drive_logic"] = logic_expression
-            print(f"Auto-populated Alarm Drive Logic for Slot {slot_num}, Channel {channel_num}: {logic_expression}")
+            channel_num = 1
+
+        logic_expression = self._logic_for_channel(slot_num, channel_num)
+        self._alarm_logic_text.setPlainText(logic_expression)
+        self.config_data["alarm_drive_logic"] = logic_expression
+        print(f"Auto-populated Alarm Drive Logic for Slot {slot_num}, "
+              f"Channel {channel_num}: {logic_expression}")
 
     def _update_channel_association_dropdown(self, module):
         """Update the Channel Association dropdown based on the number of
         available channels in the selected module."""
+        if not hasattr(self, "_channel_combo"):
+            return
         n_channels = self._channel_count_for_module(module)
-        
-        if n_channels <= 0:
-            # If no channels, disable the dropdown or show empty
-            if hasattr(self, "_channel_combo"):
-                self._channel_combo['values'] = ["No Channels"]
-                self._channel_combo.set("No Channels")
-                self._channel_combo.config(state="disabled")
-        else:
-            # Update dropdown with available channels
-            if hasattr(self, "_channel_combo"):
-                channel_values = [f"Channel {i}" for i in range(1, n_channels + 1)]
-                self._channel_combo['values'] = channel_values
-                self._channel_combo.config(state="readonly")
-                # Set to first channel if current selection is invalid
-                current_selection = self._channel_combo.get()
-                if current_selection not in channel_values:
-                    self._channel_combo.set(channel_values[0])
+        combo = self._channel_combo
 
-    def _on_channel_config(self, channel_num):
-        """Channel configuration dialog removed - not needed in the simplified UI."""
-        pass
+        if n_channels <= 0:
+            combo.clear()
+            combo.addItem("No Channels")
+            combo.setCurrentIndex(0)
+            combo.setEnabled(False)
+        else:
+            channel_values = [f"Channel {i}" for i in range(1, n_channels + 1)]
+            current = combo.currentText()
+            combo.setEnabled(True)
+            combo.clear()
+            combo.addItems(channel_values)
+            # keep the current selection if still valid, else the first channel
+            combo.setCurrentText(current if current in channel_values else channel_values[0])
 
     # ──────────────────────────────────────────────────────────────────
     #  Alarm Drive Logic
     # ──────────────────────────────────────────────────────────────────
-    def _build_alarm_drive_logic(self, parent):
-        text_frame = sunken_frame(parent)
-        text_frame.pack(fill="both", expand=True)
-
-        self._alarm_logic_text = tk.Text(
-            text_frame, font=self._f_norm, bg=T["field_bg"], fg=T["text"],
-            relief="flat", bd=0, wrap="word", height=6,
+    def _build_alarm_drive_logic(self, parent_layout):
+        te = QPlainTextEdit()
+        te.setFont(self._f_norm)
+        te.setStyleSheet(
+            f"QPlainTextEdit {{ background:{T['field_bg']}; color:{T['text']};"
+            f" border:2px inset {T['border_dark']}; }}"
         )
-        self._alarm_logic_text.insert("1.0", self.config_data["alarm_drive_logic"])
-        self._alarm_logic_text.pack(fill="both", expand=True)
+        te.setPlainText(self.config_data["alarm_drive_logic"])
+        self._alarm_logic_text = te
+        parent_layout.addWidget(te, 1)
 
     # ──────────────────────────────────────────────────────────────────
     #  Bottom button bar
     # ──────────────────────────────────────────────────────────────────
     def _build_bottom_bar(self, main):
-        tk.Frame(main, bg=T["border_dark"], height=1).pack(fill="x", pady=(0, 6))
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background:{T['border_dark']};")
+        main.addWidget(line)
+        main.addSpacing(6)
 
-        bottom = tk.Frame(main, bg=T["win_bg"])
-        bottom.pack(fill="x")
+        bottom = QHBoxLayout()
+        for text, cb in (("Ok", self._on_ok), ("Point Names", self._on_point_names),
+                         ("Cancel", self._on_cancel), ("Print", self._on_print),
+                         ("Help", self._on_help)):
+            bottom.addWidget(classic_button(text, cb, self._f_norm, width=10))
+        bottom.addStretch(1)
 
-        classic_button(bottom, "Ok", self._on_ok, self._f_norm, width=10).pack(side="left", padx=2)
-        classic_button(bottom, "Point Names", self._on_point_names, self._f_norm, width=10).pack(side="left", padx=2)
-        classic_button(bottom, "Cancel", self._on_cancel, self._f_norm, width=10).pack(side="left", padx=2)
-        classic_button(bottom, "Print", self._on_print, self._f_norm, width=10).pack(side="left", padx=2)
-        classic_button(bottom, "Help", self._on_help, self._f_norm, width=10).pack(side="left", padx=2)
-
-        tk.Label(bottom, text="VMS 3000", font=self._f_vms,
-                 bg=T["win_bg"], fg=T["accent"]).pack(side="right", padx=(4, 0))
+        vms = QLabel("VMS 3000")
+        vms.setFont(self._f_vms)
+        vms.setStyleSheet(f"color:{T['accent']}; background:transparent;")
+        bottom.addWidget(vms)
+        main.addLayout(bottom)
 
     # ──────────────────────────────────────────────────────────────────
     #  Button handlers
     # ──────────────────────────────────────────────────────────────────
     def _on_ok(self):
-        self.config_data["channel_association"] = self._channel_combo.get()
-        self.config_data["active"] = self._active_var.get()
-        self.config_data["latching_relay"] = self._latching_var.get()
-        self.config_data["alarm_drive_logic"] = self._alarm_logic_text.get("1.0", "end-1c")
-        self.config_data["monitor_channels"] = list(self._monitor_listbox.get(0, "end"))
+        self.config_data["channel_association"] = self._channel_combo.currentText()
+        self.config_data["active"] = self._active_chk.isChecked()
+        self.config_data["latching_relay"] = self._latching_chk.isChecked()
+        self.config_data["alarm_drive_logic"] = self._logic_text()
+        self.config_data["monitor_channels"] = [
+            self._monitor_listbox.item(i).text() for i in range(self._monitor_listbox.count())
+        ]
         print(f"Ok — relay configuration applied for slot {self._slot_num}: {self.config_data}")
-        self._dialog.destroy()
+        self._dialog.accept()
 
     def _on_point_names(self):
         print(f"Point Names for slot {self._slot_num}")
 
     def _on_cancel(self):
-        self._dialog.destroy()
+        self._dialog.reject()
 
     def _on_print(self):
         print(f"Print relay configuration for slot {self._slot_num}")
@@ -790,15 +746,14 @@ class RelayConfigDialog:
 #  Standalone demo
 # ══════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    root = tk.Tk()
-    root.title("VMS 3000 Demo Host")
-    root.geometry("300x120")
+    from PyQt6.QtWidgets import QApplication
 
-    def open_dialog():
-        dlg = RelayConfigDialog(root, slot_num=1, rack_type="Standard Relay", config_id="", selected_slot=4)
-        dlg.show()
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
 
-    tk.Button(root, text="Open Relay Configuration...",
-              command=open_dialog, wraplength=260).pack(expand=True, padx=20, pady=20)
-
-    root.mainloop()
+    host = QPushButton("Open Relay Configuration...")
+    host.resize(300, 120)
+    host.clicked.connect(lambda: RelayConfigDialog(
+        host, slot_num=1, rack_type="Standard Relay", config_id="", selected_slot=4).show())
+    host.show()
+    sys.exit(app.exec())

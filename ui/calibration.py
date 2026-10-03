@@ -1,238 +1,341 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-import serial
-import serial.tools.list_ports
-import time
-import threading
+"""
+calibration.py — VMS 3000  •  Calibration window (PyQt6)
+
+Standalone tool:  python ui/calibration.py
+"""
+
+import os
+import sys
 from datetime import datetime
 
-class CalibrationApp:
+# project root on the path so qt_common can be imported when run directly
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import serial
+import serial.tools.list_ports
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QGridLayout, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QMainWindow, QPushButton, QVBoxLayout, QWidget,
+)
+
+from qt_common import show_error, show_info, show_warning
+
+FONT = "MS Sans Serif"
+BTN_BG = "#421F00"
+
+
+def _font(size, bold=False):
+    f = QFont(FONT)
+    f.setPointSize(size)
+    f.setBold(bold)
+    return f
+
+
+def _group(title, size=10, bold=True):
+    g = QGroupBox(title)
+    g.setFont(_font(size, bold))
+    g.setStyleSheet(
+        "QGroupBox { border:1px groove #8a8f98; margin-top:10px; padding-top:8px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left:8px; padding:0 3px; }"
+    )
+    return g
+
+
+def _entry(value="0.0", readonly=False, chars=12):
+    e = QLineEdit(value)
+    e.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    e.setFont(_font(9, True))
+    e.setReadOnly(readonly)
+    e.setFixedWidth(chars * 9 + 10)
+    return e
+
+
+def _button(text, cb, width=None, enabled=True):
+    b = QPushButton(text)
+    b.setFont(_font(9, True))
+    b.setStyleSheet(
+        f"QPushButton {{ background:{BTN_BG}; color:white; padding:6px 10px; border:1px solid #2a1400; }}"
+        "QPushButton:hover { background:#5a2b00; }"
+        "QPushButton:disabled { background:#8b7a6b; color:#e0d8d0; }"
+    )
+    if width:
+        b.setFixedWidth(width)
+    b.setEnabled(enabled)
+    b.clicked.connect(lambda _c=False: cb())
+    return b
+
+
+class CalibrationApp(QMainWindow):
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Calibration")
-        self.root.geometry("1320x900")
-        self.root.resizable(False, False)
-        
+        super().__init__()
+        self.setWindowTitle("Calibration")
+        self.setFixedSize(1320, 900)
+
         self.ser = None
         self.is_connected = False
         self.current_slave_id = 15
         self.current_baud = 115200
-        
+
+        # Per-gain-section widget lists, keyed by gain number (1, 2, 3)
+        self.present_gains = {}
+        self.calc_gains = {}
+        self.check_boxes = {}
+        self.read_values = {}
+        self.actual_mills = {}
+        self.actual_vrms = {}
+
         self.setup_ui()
         self.load_com_ports()
 
+    # ------------------------------------------------------------------ #
     def setup_ui(self):
-        # ==================== CONNECTION FRAME ====================
-        conn_frame = tk.LabelFrame(self.root, text="Connection", font=("MS Sans Serif", 10, "bold"))
-        conn_frame.place(x=1040, y=570, width=210, height=250)
-
-        tk.Label(conn_frame, text="Slave Id", font=("MS Sans Serif", 8, "bold")).place(x=10, y=30)
-        self.module_Address_Cmbox = ttk.Combobox(conn_frame, values=[str(i) for i in range(1, 32)], width=8)
-        self.module_Address_Cmbox.set("15")
-        self.module_Address_Cmbox.place(x=100, y=30)
-
-        tk.Label(conn_frame, text="Com Port", font=("MS Sans Serif", 8, "bold")).place(x=10, y=70)
-        self.COM_Port_Cmbox = ttk.Combobox(conn_frame, width=8)
-        self.COM_Port_Cmbox.place(x=100, y=70)
-
-        tk.Label(conn_frame, text="Baud Rate", font=("MS Sans Serif", 8, "bold")).place(x=10, y=110)
-        self.Baud_Rate_Cmbox = ttk.Combobox(conn_frame, values=["9600", "19200", "38400", "57600", "115200"], width=8)
-        self.Baud_Rate_Cmbox.set("115200")
-        self.Baud_Rate_Cmbox.place(x=100, y=110)
-
-        self.connect_btn = tk.Button(conn_frame, text="Connect", font=("MS Sans Serif", 9, "bold"), 
-                                   bg="#421F00", fg="white", command=self.connect_device)
-        self.connect_btn.place(x=45, y=150, width=120, height=35)
-
-        self.disconnect_btn = tk.Button(conn_frame, text="Disconnect", font=("MS Sans Serif", 9, "bold"), 
-                                      bg="#421F00", fg="white", command=self.disconnect_device, state="disabled")
-        self.disconnect_btn.place(x=45, y=195, width=120, height=35)
-
-        # ==================== DATE TIME FRAME ====================
-        dt_frame = tk.Frame(self.root)
-        dt_frame.place(x=670, y=760, width=370, height=70)
-
-        tk.Button(dt_frame, text="SET DATE-TIME", font=("MS Sans Serif", 9, "bold"), 
-                 bg="#421F00", fg="white", command=self.set_date_time).pack(pady=15, padx=10, side="left")
-        
-        tk.Button(dt_frame, text="Exit", font=("MS Sans Serif", 9, "bold"), 
-                 bg="#421F00", fg="white", command=self.root.quit).pack(pady=15, padx=10, side="left")
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
 
         # ==================== GAIN SECTIONS ====================
-        self.gain_var = tk.IntVar(value=1)
-        
-        # Gain -1
-        self.create_gain_section(1, "Gain -1", 10, 10)
-        # Gain -2
-        self.create_gain_section(2, "Gain -2", 10, 290)
-        # Gain (CH Gain)
-        self.create_gain_section(3, "Gain", 10, 570)
+        root.addWidget(self.create_gain_section(1, "Gain -1"))
+        root.addWidget(self.create_gain_section(2, "Gain -2"))
+        root.addWidget(self.create_gain_section(3, "Gain"))      # CH Gain
 
-    def create_gain_section(self, gain_num, title, x, y):
-        frame = tk.LabelFrame(self.root, text=title, font=("MS Sans Serif", 13), 
-                            height=260, width=1230)
-        frame.place(x=x, y=y)
+        # ==================== CONNECTION + DATE-TIME ====================
+        bottom = QHBoxLayout()
+        bottom.setSpacing(12)
+        root.addLayout(bottom)
+        bottom.addWidget(self._build_connection_group(), 1)
+        bottom.addWidget(self._build_datetime_group())
+
+    def _build_connection_group(self):
+        g = _group("Connection")
+        g.setMaximumHeight(90)
+        row = QHBoxLayout(g)
+        row.setSpacing(8)
+
+        def lbl(t):
+            l = QLabel(t)
+            l.setFont(_font(8, True))
+            return l
+
+        row.addWidget(lbl("Slave Id"))
+        self.module_Address_Cmbox = QComboBox()
+        self.module_Address_Cmbox.setEditable(True)
+        self.module_Address_Cmbox.addItems([str(i) for i in range(1, 32)])
+        self.module_Address_Cmbox.setCurrentText("15")
+        self.module_Address_Cmbox.setFixedWidth(80)
+        row.addWidget(self.module_Address_Cmbox)
+
+        row.addSpacing(10)
+        row.addWidget(lbl("Com Port"))
+        self.COM_Port_Cmbox = QComboBox()
+        self.COM_Port_Cmbox.setEditable(True)
+        self.COM_Port_Cmbox.setFixedWidth(110)
+        row.addWidget(self.COM_Port_Cmbox)
+
+        row.addSpacing(10)
+        row.addWidget(lbl("Baud Rate"))
+        self.Baud_Rate_Cmbox = QComboBox()
+        self.Baud_Rate_Cmbox.setEditable(True)
+        self.Baud_Rate_Cmbox.addItems(["9600", "19200", "38400", "57600", "115200"])
+        self.Baud_Rate_Cmbox.setCurrentText("115200")
+        self.Baud_Rate_Cmbox.setFixedWidth(100)
+        row.addWidget(self.Baud_Rate_Cmbox)
+
+        row.addSpacing(10)
+        self.connect_btn = _button("Connect", self.connect_device, 120)
+        self.disconnect_btn = _button("Disconnect", self.disconnect_device, 120, enabled=False)
+        row.addWidget(self.connect_btn)
+        row.addWidget(self.disconnect_btn)
+        row.addStretch(1)
+        return g
+
+    def _build_datetime_group(self):
+        g = QWidget()
+        row = QHBoxLayout(g)
+        row.setContentsMargins(0, 14, 0, 0)
+        row.addWidget(_button("SET DATE-TIME", self.set_date_time))
+        row.addWidget(_button("Exit", self.close))
+        return g
+
+    # ------------------------------------------------------------------ #
+    def create_gain_section(self, gain_num, title):
+        frame = _group(title, size=13, bold=False)
+        outer = QVBoxLayout(frame)
+        outer.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(16)
+        outer.addLayout(top)
+
+        small_bold = _font(8, True)
 
         # Present Gain
-        present_frame = tk.LabelFrame(frame, text="Present Gain", font=("MS Sans Serif", 10, "bold"))
-        present_frame.place(x=20, y=30, width=280, height=160)
-        
-        self.present_gains = []
+        present = _group("Present Gain")
+        g = QGridLayout(present)
+        self.present_gains[gain_num] = []
         for i in range(4):
-            tk.Label(present_frame, text=f"CH{i+1} GAIN{gain_num}", 
-                    font=("MS Sans Serif", 8, "bold")).grid(row=i, column=0, padx=5, pady=5, sticky="w")
-            entry = tk.Entry(present_frame, width=12, justify="center", font=("MS Sans Serif", 9, "bold"))
-            entry.insert(0, "0.0")
-            entry.config(state="readonly")
-            entry.grid(row=i, column=1, padx=5, pady=5)
-            self.present_gains.append(entry)
+            l = QLabel(f"CH{i + 1} GAIN{gain_num}")
+            l.setFont(small_bold)
+            g.addWidget(l, i, 0)
+            e = _entry(readonly=True)
+            g.addWidget(e, i, 1)
+            self.present_gains[gain_num].append(e)
+        top.addWidget(present)
 
         # Calculated Gain
-        calc_frame = tk.LabelFrame(frame, text="Calculated Gain", font=("MS Sans Serif", 10, "bold"))
-        calc_frame.place(x=320, y=30, width=300, height=160)
-        
-        self.calc_gains = []
-        self.check_vars = []
+        calc = _group("Calculated Gain")
+        g = QGridLayout(calc)
+        self.calc_gains[gain_num] = []
+        self.check_boxes[gain_num] = []
         for i in range(4):
-            tk.Label(calc_frame, text=f"CH{i+1} GAIN{gain_num}", 
-                    font=("MS Sans Serif", 8, "bold")).grid(row=i, column=0, padx=5, pady=5, sticky="w")
-            entry = tk.Entry(calc_frame, width=12, justify="center", font=("MS Sans Serif", 9, "bold"))
-            entry.insert(0, "0.0")
-            entry.grid(row=i, column=1, padx=5, pady=5)
-            self.calc_gains.append(entry)
-            
-            var = tk.BooleanVar()
-            chk = tk.Checkbutton(calc_frame, variable=var)
-            chk.grid(row=i, column=2)
-            self.check_vars.append(var)
+            l = QLabel(f"CH{i + 1} GAIN{gain_num}")
+            l.setFont(small_bold)
+            g.addWidget(l, i, 0)
+            e = _entry()
+            g.addWidget(e, i, 1)
+            self.calc_gains[gain_num].append(e)
+            chk = QCheckBox()
+            g.addWidget(chk, i, 2)
+            self.check_boxes[gain_num].append(chk)
+        top.addWidget(calc)
 
         # Read Value
-        read_frame = tk.LabelFrame(frame, text="Read Value", font=("MS Sans Serif", 10, "bold"))
-        read_frame.place(x=640, y=30, width=150, height=170)
-        
-        self.read_values = []
+        read = _group("Read Value")
+        g = QVBoxLayout(read)
+        self.read_values[gain_num] = []
         for i in range(4):
-            entry = tk.Entry(read_frame, width=10, justify="center", font=("MS Sans Serif", 9, "bold"))
-            entry.insert(0, "0.0")
-            entry.config(state="readonly")
-            entry.grid(row=i, column=0, padx=10, pady=8)
-            self.read_values.append(entry)
-        
-        tk.Label(read_frame, text="Mills", font=("MS Sans Serif", 8, "bold")).grid(row=4, column=0, pady=5)
+            e = _entry(chars=10, readonly=True)
+            g.addWidget(e, 0, Qt.AlignmentFlag.AlignHCenter)
+            self.read_values[gain_num].append(e)
+        mills = QLabel("Mills")
+        mills.setFont(small_bold)
+        g.addWidget(mills, 0, Qt.AlignmentFlag.AlignHCenter)
+        top.addWidget(read)
 
         # Actual Values
-        actual_frame = tk.LabelFrame(frame, text="Actual Values", font=("MS Sans Serif", 10, "bold"))
-        actual_frame.place(x=810, y=30, width=390, height=170)
-        
-        # Vrms and Mills columns
-        tk.Label(actual_frame, text="In Mills", font=("MS Sans Serif", 8, "bold")).grid(row=0, column=0, columnspan=2)
-        tk.Label(actual_frame, text="Vrms In Volts", font=("MS Sans Serif", 8, "bold")).grid(row=0, column=2, columnspan=2)
-        
-        self.actual_mills = []
-        self.actual_vrms = []
-        
+        actual = _group("Actual Values")
+        g = QGridLayout(actual)
+        for col, text in ((0, "In Mills"), (1, "Vrms In Volts")):
+            l = QLabel(text)
+            l.setFont(small_bold)
+            l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            g.addWidget(l, 0, col)
+        self.actual_mills[gain_num] = []
+        self.actual_vrms[gain_num] = []
         for i in range(4):
-            # Mills
-            entry_m = tk.Entry(actual_frame, width=12, justify="center", font=("MS Sans Serif", 9, "bold"))
-            entry_m.insert(0, "0.0")
-            entry_m.grid(row=i+1, column=0, padx=5, pady=3)
-            self.actual_mills.append(entry_m)
-            
-            # Vrms
-            entry_v = tk.Entry(actual_frame, width=12, justify="center", font=("MS Sans Serif", 9, "bold"))
-            entry_v.insert(0, "0.0")
-            entry_v.grid(row=i+1, column=2, padx=5, pady=3)
-            self.actual_vrms.append(entry_v)
+            em = _entry()
+            ev = _entry()
+            g.addWidget(em, i + 1, 0)
+            g.addWidget(ev, i + 1, 1)
+            self.actual_mills[gain_num].append(em)
+            self.actual_vrms[gain_num].append(ev)
+        top.addWidget(actual)
+        top.addStretch(1)
 
         # Buttons
-        btn_frame = tk.Frame(frame)
-        btn_frame.place(x=320, y=200)
+        btns = QHBoxLayout()
+        btns.addSpacing(330)
+        btns.addWidget(_button("Calculate", lambda g=gain_num: self.calculate_gain(g), 120))
+        btns.addSpacing(10)
+        btns.addWidget(_button("Write", lambda g=gain_num: self.write_gain(g), 120))
+        btns.addStretch(1)
+        outer.addLayout(btns)
+        return frame
 
-        tk.Button(btn_frame, text="Calculate", font=("MS Sans Serif", 9, "bold"), 
-                 bg="#421F00", fg="white", width=12, command=lambda g=gain_num: self.calculate_gain(g)).pack(side="left", padx=10)
-        
-        tk.Button(btn_frame, text="Write", font=("MS Sans Serif", 9, "bold"), 
-                 bg="#421F00", fg="white", width=12, command=lambda g=gain_num: self.write_gain(g)).pack(side="left", padx=10)
-
+    # ------------------------------------------------------------------ #
     def load_com_ports(self):
         ports = [port.device for port in serial.tools.list_ports.comports()]
-        self.COM_Port_Cmbox['values'] = ports
+        self.COM_Port_Cmbox.clear()
+        self.COM_Port_Cmbox.addItems(ports)
         if ports:
-            self.COM_Port_Cmbox.set(ports[0])
+            self.COM_Port_Cmbox.setCurrentText(ports[0])
 
     def connect_device(self):
         if self.is_connected:
             return
-            
+
         try:
-            port = self.COM_Port_Cmbox.get()
-            baud = int(self.Baud_Rate_Cmbox.get())
-            slave = int(self.module_Address_Cmbox.get())
-            
+            port = self.COM_Port_Cmbox.currentText()
+            baud = int(self.Baud_Rate_Cmbox.currentText())
+            slave = int(self.module_Address_Cmbox.currentText())
+
             self.ser = serial.Serial(port, baud, timeout=1)
             self.current_slave_id = slave
+            self.current_baud = baud
             self.is_connected = True
-            
-            self.connect_btn.config(state="disabled")
-            self.disconnect_btn.config(state="normal")
-            messagebox.showinfo("Success", f"Connected to {port} at {baud} baud")
-            
+
+            self.connect_btn.setEnabled(False)
+            self.disconnect_btn.setEnabled(True)
+            show_info(self, "Success", f"Connected to {port} at {baud} baud")
+
         except Exception as e:
-            messagebox.showerror("Connection Error", str(e))
+            show_error(self, "Connection Error", str(e))
 
     def disconnect_device(self):
         if self.ser:
             self.ser.close()
         self.is_connected = False
-        self.connect_btn.config(state="normal")
-        self.disconnect_btn.config(state="disabled")
+        self.connect_btn.setEnabled(True)
+        self.disconnect_btn.setEnabled(False)
 
     def set_date_time(self):
         if not self.is_connected:
-            messagebox.showwarning("Not Connected", "Please connect first")
+            show_warning(self, "Not Connected", "Please connect first")
             return
         # Send date time command (placeholder)
         dt = datetime.now()
-        messagebox.showinfo("Date Time", f"Set to: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        show_info(self, "Date Time", f"Set to: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
 
     def calculate_gain(self, gain_num):
         if not self.is_connected:
-            messagebox.showwarning("Not Connected", "Please connect device first")
+            show_warning(self, "Not Connected", "Please connect device first")
             return
-            
+
         try:
-            # Read values from actual mills
             for i in range(4):
-                mills = float(self.actual_mills[i].get() or 0)
-                vrms = float(self.actual_vrms[i].get() or 0)
-                
+                mills = float(self.actual_mills[gain_num][i].text() or 0)
+                vrms = float(self.actual_vrms[gain_num][i].text() or 0)
+
                 if vrms != 0:
                     gain = mills / vrms
-                    self.calc_gains[i*3 + (gain_num-1)].delete(0, tk.END)  # Simplified indexing
-                    self.calc_gains[i*3 + (gain_num-1)].insert(0, f"{gain:.4f}")
+                    self.calc_gains[gain_num][i].setText(f"{gain:.4f}")
         except Exception as e:
-            messagebox.showerror("Calculate Error", str(e))
+            show_error(self, "Calculate Error", str(e))
 
     def write_gain(self, gain_num):
         if not self.is_connected:
-            messagebox.showwarning("Not Connected", "Please connect device first")
+            show_warning(self, "Not Connected", "Please connect device first")
             return
-            
+
         try:
             for i in range(4):
-                if self.check_vars[i].get():
-                    gain_val = float(self.calc_gains[i*3 + (gain_num-1)].get() or 0)
+                if self.check_boxes[gain_num][i].isChecked():
+                    gain_val = float(self.calc_gains[gain_num][i].text() or 0)
                     # TODO: Send Modbus/Protocol command to write gain
-                    print(f"Writing CH{i+1} Gain{gain_num}: {gain_val}")
-            
-            messagebox.showinfo("Success", f"Gain {gain_num} values written successfully")
+                    print(f"Writing CH{i + 1} Gain{gain_num}: {gain_val}")
+
+            show_info(self, "Success", f"Gain {gain_num} values written successfully")
         except Exception as e:
-            messagebox.showerror("Write Error", str(e))
+            show_error(self, "Write Error", str(e))
+
+    def closeEvent(self, event):
+        if self.ser:
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+        super().closeEvent(event)
 
     def run(self):
-        self.root.mainloop()
+        self.show()
 
 
 if __name__ == "__main__":
-    app = CalibrationApp()
-    app.run()
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    win = CalibrationApp()
+    win.run()
+    sys.exit(app.exec())

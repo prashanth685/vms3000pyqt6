@@ -1,58 +1,51 @@
 """
-main.py — VMS 3000 Rack Configuration Software v0.5
+main.py — VMS 3000 Rack Configuration Software v0.5   (PyQt6)
 """
 
-import tkinter as tk
-import tkinter.font as tkfont
-from tkinter import messagebox, filedialog
 import datetime
+import sys
 
-from theme     import T
-from menubar   import build_menubar
-from toolbar   import build_toolbar
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtWidgets import (
+    QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QVBoxLayout, QWidget,
+)
+
+from theme import T
+from qt_common import ask_yes_no, hline, make_fonts, show_info, vline
+from menubar import build_menubar
+from toolbar import build_toolbar
 from rack_area import RackArea
-from tooltip   import ToolTip
+from tooltip import ToolTip
 from src.sidebar.sidebar import build_sidebar
 from src.sidebar.rack_setup import open_rack_setup
 from src.sidebar.open_config_load import LoadConfigDialog
 from src.sidebar.open_config_save import SaveConfigDialog
 from src.sidebar.connection import DirectConnectDialog, NetworkConnectDialog, disconnect_device
 
-class VMS3000(tk.Tk):
+
+class VMS3000(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.title("VMS 3000  —  Rack Configuration Software  v0.5")
-        self.geometry("1400x900")
-        self.minsize(1200, 700)
-        self.configure(bg=T["win_bg"])
-
-        # ── Shared state ─────────────────────────────────────────────
-        self._rack_addr = tk.StringVar(value="1")
-        self._time_var  = tk.StringVar()
-        self._date_var  = tk.StringVar(
-            value=datetime.datetime.now().strftime("%d-%m-%Y")
-        )
-        self._conn_var  = tk.StringVar(value="Not Connected")
-        self._hint_var  = tk.StringVar(value="Click any slot to assign module")
+        self.setWindowTitle("VMS 3000  —  Rack Configuration Software  v0.5")
+        self.resize(1400, 900)
+        self.setMinimumSize(1200, 700)
+        self.setStyleSheet(f"QMainWindow {{ background:{T['win_bg']}; }}")
 
         # ── Fonts ────────────────────────────────────────────────────
-        self.F = {
-            "menu":    tkfont.Font(family="Segoe UI", size=11),
-            "ui":      tkfont.Font(family="Segoe UI", size=10),
-            "ui_b":    tkfont.Font(family="Segoe UI", size=10,  weight="bold"),
-            "sm":      tkfont.Font(family="Segoe UI", size=9),
-            "sm_b":    tkfont.Font(family="Segoe UI", size=9,  weight="bold"),
-            "xs":      tkfont.Font(family="Segoe UI", size=8),
-            "xs_b":    tkfont.Font(family="Segoe UI", size=8,  weight="bold"),
-            "vms":     tkfont.Font(family="Segoe UI", size=13, weight="bold"),
-            "mono":    tkfont.Font(family="Courier New", size=9),
-            "num":     tkfont.Font(family="Segoe UI", size=9,  weight="bold"),
-        }
+        self.F = make_fonts()
+
+        # ── Central widget + vertical stack ──────────────────────────
+        central = QWidget()
+        central.setStyleSheet(f"background:{T['win_bg']};")
+        self.setCentralWidget(central)
+        self._main_layout = QVBoxLayout(central)
+        self._main_layout.setContentsMargins(0, 0, 0, 0)
+        self._main_layout.setSpacing(0)
 
         # ── Build UI ─────────────────────────────────────────────────
         self._build_menu()
-        
+
         # Define toolbar command callbacks
         toolbar_callbacks = {
             "new": self._cmd_new,
@@ -68,14 +61,17 @@ class VMS3000(tk.Tk):
             "refresh": lambda: print("Refresh action"),
             "help": self._cmd_about,
         }
-        
-        self._icons = build_toolbar(self, self.F, self._rack_addr, toolbar_callbacks)
+
+        self._icons = build_toolbar(central, self.F, "1", toolbar_callbacks)
 
         # ── Border after toolbar ───────────────────────────────────────
-        tk.Frame(self, bg=T["toolbar_border"], height=2).pack(fill="x", padx=0)
+        self._main_layout.addWidget(hline(T["toolbar_border"], 2))
 
-        body = tk.Frame(self, bg=T["win_bg"])
-        body.pack(fill="both", expand=True, padx=0, pady=0)
+        body = QWidget()
+        body_lay = QHBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
+        self._main_layout.addWidget(body, 1)
 
         build_sidebar(body, self.F, {
             "rack_setup": self._cmd_rack_setup,
@@ -84,11 +80,16 @@ class VMS3000(tk.Tk):
         })
 
         # ── Separator between sidebar and rack area ─────────────────────
-        tk.Frame(body, bg=T["toolbar_border"], width=1).pack(side="left", fill="y")
+        body_lay.addWidget(vline(T["toolbar_border"], 1))
 
-        self._rack = RackArea(body, self.F, self._hint_var)
+        self._rack = RackArea(body, self.F)
+        body_lay.addWidget(self._rack, 1)
 
         self._build_status_bar()
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(30_000)
         self._tick()
 
     # ── Menu ─────────────────────────────────────────────────────────
@@ -111,90 +112,75 @@ class VMS3000(tk.Tk):
     # ── Status bar ────────────────────────────────────────────────────
 
     def _build_status_bar(self):
-        bar = tk.Frame(
-            self,
-            bg=T["status_bg"],
-            highlightbackground=T["status_border"],
-            highlightthickness=1,
+        bar = QFrame()
+        bar.setObjectName("statusBar")
+        bar.setStyleSheet(
+            f"QFrame#statusBar {{ background:{T['status_bg']};"
+            f" border:1px solid {T['status_border']}; }}"
         )
-        bar.pack(side="bottom", fill="x")
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(0)
+
+        def label(text, font, color):
+            l = QLabel(text)
+            l.setFont(font)
+            l.setStyleSheet(f"color:{color}; background:transparent;")
+            return l
+
+        def sep():
+            s = vline(T["status_border"], 1)
+            s.setFixedHeight(22)
+            return s
 
         # Left section
-        left = tk.Frame(bar, bg=T["status_bg"])
-        left.pack(side="left", fill="y")
+        bl.addSpacing(12)
+        bl.addWidget(label("Sarayu Infotech Solutions Pvt Ltd", self.F["ui"], T["text_dim"]))
+        bl.addSpacing(12)
+        bl.addWidget(sep())
+        bl.addSpacing(10)
+        bl.addWidget(label("VMS 3000  v0.5", self.F["ui_b"], T["text_dim"]))
+        bl.addStretch(1)
 
-        tk.Label(
-            left,
-            text="Sarayu Infotech Solutions Pvt Ltd",
-            font=self.F["ui"],
-            bg=T["status_bg"],
-            fg=T["text_dim"],
-        ).pack(side="left", padx=12, pady=6)
+        # Right section (left → right: sep, date, time, sep, status text, dot)
+        bl.addWidget(sep())
+        bl.addSpacing(6)
+        self._date_lbl = label(datetime.datetime.now().strftime("%d-%m-%Y"),
+                               self.F["ui"], T["text_dim"])
+        bl.addWidget(self._date_lbl)
+        bl.addSpacing(8)
+        self._time_lbl = label("", self.F["ui"], T["text_dim"])
+        bl.addWidget(self._time_lbl)
+        bl.addSpacing(8)
+        bl.addWidget(sep())
+        bl.addSpacing(8)
+        self._conn_lbl = label("Not Connected", self.F["ui_b"], T["led_red"])
+        bl.addWidget(self._conn_lbl)
+        bl.addSpacing(6)
+        self._conn_dot = label("●", self.F["ui"], T["led_red"])
+        bl.addWidget(self._conn_dot)
+        bl.addSpacing(12)
 
-        _vsep(left, T["status_border"])
+        self._main_layout.addWidget(bar)
 
-        tk.Label(
-            left,
-            text="VMS 3000  v0.5",
-            font=self.F["ui_b"],
-            bg=T["status_bg"],
-            fg=T["text_dim"],
-        ).pack(side="left", padx=10)
-
-        # Right section
-        right = tk.Frame(bar, bg=T["status_bg"])
-        right.pack(side="right", fill="y")
-
-        self._conn_dot = tk.Label(
-            right,
-            text="●",
-            font=self.F["ui"],
-            bg=T["status_bg"],
-            fg=T["led_red"],
-        )
-        self._conn_dot.pack(side="right", padx=(0, 12), pady=6)
-
-        self._conn_lbl = tk.Label(
-            right,
-            textvariable=self._conn_var,
-            font=self.F["ui_b"],
-            bg=T["status_bg"],
-            fg=T["led_red"],
-        )
-        self._conn_lbl.pack(side="right", pady=6)
-
-        _vsep(right, T["status_border"])
-
-        tk.Label(
-            right,
-            textvariable=self._time_var,
-            font=self.F["ui"],
-            bg=T["status_bg"],
-            fg=T["text_dim"],
-        ).pack(side="right", padx=8)
-
-        tk.Label(
-            right,
-            textvariable=self._date_var,
-            font=self.F["ui"],
-            bg=T["status_bg"],
-            fg=T["text_dim"],
-        ).pack(side="right", padx=6)
-
-        _vsep(right, T["status_border"])
+    def _set_connection(self, connected: bool):
+        color = T["led_green"] if connected else T["led_red"]
+        self._conn_lbl.setText("Connected" if connected else "Not Connected")
+        self._conn_lbl.setStyleSheet(f"color:{color}; background:transparent;")
+        self._conn_dot.setStyleSheet(f"color:{color}; background:transparent;")
 
     # ── Tick ─────────────────────────────────────────────────────────
 
     def _tick(self):
-        self._time_var.set(datetime.datetime.now().strftime("%H:%M"))
-        self.after(30_000, self._tick)
+        now = datetime.datetime.now()
+        self._time_lbl.setText(now.strftime("%H:%M"))
+        self._date_lbl.setText(now.strftime("%d-%m-%Y"))
 
     # ── Commands ─────────────────────────────────────────────────────
 
     def _cmd_new(self):
-        if messagebox.askyesno("New Configuration",
-                               "Start a new configuration?\nUnsaved changes will be lost.",
-                               parent=self):
+        if ask_yes_no(self, "New Configuration",
+                      "Start a new configuration?\nUnsaved changes will be lost."):
             self._rack.clear()
 
     def _cmd_open(self):
@@ -204,59 +190,56 @@ class VMS3000(tk.Tk):
         self._rack.save_configuration()
 
     def _cmd_save_as(self):
-        messagebox.showinfo("Save As", "Save As ready.", parent=self)
+        show_info(self, "Save As", "Save As ready.")
 
     def _cmd_rack_setup(self):
         def handle_rack_config(cfg: dict):
             print(f"Rack configuration: {cfg}")
             # You can apply the configuration here
-        
+
         open_rack_setup(self, self.F, on_ok=handle_rack_config)
 
     def _cmd_direct_connect(self):
-        dialog = DirectConnectDialog(self, self.F)
-        dialog.show()
-        # Update connection status after dialog closes
-        self._conn_var.set("Connected")
-        self._conn_lbl.config(fg=T["led_green"])
-        self._conn_dot.config(fg=T["led_green"])
+        # Update connection status only if the user actually pressed Connect
+        if DirectConnectDialog(self, self.F).show():
+            self._set_connection(True)
 
     def _cmd_network_connect(self):
-        dialog = NetworkConnectDialog(self, self.F)
-        dialog.show()
-        # Update connection status after dialog closes
-        self._conn_var.set("Connected")
-        self._conn_lbl.config(fg=T["led_green"])
-        self._conn_dot.config(fg=T["led_green"])
+        if NetworkConnectDialog(self, self.F).show():
+            self._set_connection(True)
 
     def _cmd_disconnect(self):
         if disconnect_device(self):
-            self._conn_var.set("Not Connected")
-            self._conn_lbl.config(fg=T["led_red"])
-            self._conn_dot.config(fg=T["led_red"])
+            self._set_connection(False)
 
     def _cmd_diag(self):
-        messagebox.showinfo("Diagnostics", "System OK — no faults detected.", parent=self)
+        show_info(self, "Diagnostics", "System OK — no faults detected.")
 
     def _cmd_comm(self):
-        messagebox.showinfo("Communication Settings", "Communication settings ready.", parent=self)
+        show_info(self, "Communication Settings", "Communication settings ready.")
 
     def _cmd_about(self):
-        messagebox.showinfo(
+        show_info(
+            self,
             "About VMS 3000",
             "VMS 3000  Rack Configuration Software\n"
             "Version 0.5\n\n"
             "© Sarayu Infotech Solutions Pvt Ltd",
-            parent=self,
         )
 
 
-# ── Utility ──────────────────────────────────────────────────────────────────
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    # Keep the light SCADA look regardless of the OS dark-mode setting
+    hints = app.styleHints()
+    if hasattr(hints, "setColorScheme"):
+        hints.setColorScheme(Qt.ColorScheme.Light)
 
-def _vsep(parent: tk.Frame, colour: str) -> None:
-    tk.Frame(parent, bg=colour, width=1).pack(side="right", fill="y", padx=4, pady=3)
+    window = VMS3000()
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-    app = VMS3000()
-    app.mainloop()
+    main()

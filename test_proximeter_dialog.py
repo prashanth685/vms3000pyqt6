@@ -1,35 +1,44 @@
 """
 Test script for Proximity Monitor 3000 Configuration Dialog
 """
-import sys
 import os
+import sys
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Add src + project root to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
-import tkinter as tk
+from PyQt6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
+
 from points.proximiter12m_ridial import ProximityMonitor3000ConfigDialog
 
+
 def main():
-    root = tk.Tk()
-    root.title("Test Proximity Monitor 3000 Dialog")
-    root.geometry("300x200")
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    root = QWidget()
+    root.setWindowTitle("Test Proximity Monitor 3000 Dialog")
+    root.resize(300, 200)
 
     def open_12m_dialog():
-        dlg = ProximityMonitor3000ConfigDialog(root, slot_num=1, model="12M/DIS")
-        dlg.show()
+        ProximityMonitor3000ConfigDialog(root, slot_num=1, model="12M/DIS").show()
 
     def open_6m_dialog():
-        dlg = ProximityMonitor3000ConfigDialog(root, slot_num=1, model="6M")
-        dlg.show()
+        ProximityMonitor3000ConfigDialog(root, slot_num=1, model="6M").show()
 
-    btn_12m = tk.Button(root, text="Open 12M/DIS Dialog", command=open_12m_dialog)
-    btn_12m.pack(pady=20)
+    lay = QVBoxLayout(root)
+    btn_12m = QPushButton("Open 12M/DIS Dialog")
+    btn_12m.clicked.connect(open_12m_dialog)
+    lay.addWidget(btn_12m)
+    btn_6m = QPushButton("Open 6M Dialog")
+    btn_6m.clicked.connect(open_6m_dialog)
+    lay.addWidget(btn_6m)
+    lay.addStretch(1)
 
-    btn_6m = tk.Button(root, text="Open 6M Dialog", command=open_6m_dialog)
-    btn_6m.pack(pady=20)
+    root.show()
+    sys.exit(app.exec())
 
-    root.mainloop()
 
 if __name__ == "__main__":
     main()

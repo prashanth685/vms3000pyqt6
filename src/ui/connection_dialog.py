@@ -3,245 +3,168 @@ connection_dialog.py — VMS 3000 Direct Connection Dialog
 Dialog for direct connect with Rack Address, COM Port, and Baud Rate
 """
 
-import tkinter as tk
-from tkinter import ttk
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QVBoxLayout, QWidget,
+)
 
 
 class ConnectionDialog:
     """Direct Connect dialog as shown in the reference image."""
-    
+
     def __init__(self, parent, available_com_ports=None, bg_color="#f4f6f9"):
         self.parent = parent
         self.available_com_ports = available_com_ports or []
         self.bg_color = bg_color
         self.dialog = None
         self.result = None
-        
+
         # Default values
-        self.rack_address = tk.StringVar(value="1")
-        self.com_port = tk.StringVar(value=available_com_ports[0] if available_com_ports else "COM1")
-        self.baud_rate = tk.StringVar(value="115200")
-        self.password = tk.StringVar(value="")
-    
+        self.rack_address = "1"
+        self.com_port = available_com_ports[0] if available_com_ports else "COM1"
+        self.baud_rate = "115200"
+        self.password = ""
+
+        # Widgets (created in _build_ui)
+        self._password_edit = None
+        self._rack_combo = None
+        self._com_combo = None
+        self._baud_combo = None
+
     def show(self):
-        """Show the connection dialog and return the result."""
-        self.dialog = tk.Toplevel(self.parent)
-        self.dialog.title("Direct Connect")
-        self.dialog.configure(bg=self.bg_color)
-        self.dialog.resizable(False, False)
-        self.dialog.transient(self.parent)
-        self.dialog.grab_set()
-        
+        """Show the connection dialog (modal) and return the result."""
+        self.dialog = QDialog(self.parent)
+        self.dialog.setWindowTitle("Direct Connect")
+        self.dialog.setModal(True)
+        self.dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.dialog.setObjectName("connDialog")
+        self.dialog.setStyleSheet(f"QDialog#connDialog {{ background:{self.bg_color}; }}")
+
         self._build_ui()
-        
+
         # Set minimum size to ensure all content is visible
-        self.dialog.update_idletasks()
-        width = max(400, self.dialog.winfo_reqwidth())
-        height = max(350, self.dialog.winfo_reqheight())
-        self.dialog.geometry(f"{width}x{height}")
-        
-        # Center dialog after setting size
+        self.dialog.adjustSize()
+        hint = self.dialog.sizeHint()
+        self.dialog.setFixedSize(max(400, hint.width()), max(350, hint.height()))
+
         self._center_dialog()
-        
-        self.parent.wait_window(self.dialog)
+        self.dialog.exec()
         return self.result
-    
+
     def _center_dialog(self):
         """Center dialog on screen."""
-        self.dialog.update_idletasks()
-        
-        # Get screen dimensions
-        screen_width = self.dialog.winfo_screenwidth()
-        screen_height = self.dialog.winfo_screenheight()
-        
-        # Get dialog dimensions
-        dialog_width = self.dialog.winfo_width()
-        dialog_height = self.dialog.winfo_height()
-        
-        # Calculate center position
-        x = (screen_width - dialog_width) // 2
-        y = (screen_height - dialog_height) // 2
-        
-        self.dialog.geometry(f"+{x}+{y}")
-    
+        from qt_common import center_on_screen
+        center_on_screen(self.dialog)
+
+    # ------------------------------------------------------------------ #
+
+    def _field_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setFont(QFont("Arial", 10))
+        lbl.setStyleSheet("color:black; background:transparent;")
+        return lbl
+
+    def _combo(self, values, current) -> QComboBox:
+        cb = QComboBox()
+        cb.setFont(QFont("Arial", 10))
+        cb.addItems([str(v) for v in values])
+        idx = cb.findText(str(current))
+        if idx >= 0:
+            cb.setCurrentIndex(idx)
+        cb.setStyleSheet("QComboBox { background:#ffffff; color:black; padding:3px 6px; }")
+        return cb
+
+    def _btn(self, text, cb, bg, fg, bold, pad_x):
+        b = QPushButton(text)
+        f = QFont("Arial", 10)
+        f.setBold(bold)
+        b.setFont(f)
+        b.setAutoDefault(False)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setStyleSheet(
+            f"QPushButton {{ background:{bg}; color:{fg}; border:2px outset {bg};"
+            f" padding:5px {pad_x}px; }}"
+            f"QPushButton:pressed {{ border-style:inset; }}"
+        )
+        b.clicked.connect(lambda _c=False: cb())
+        return b
+
     def _build_ui(self):
         """Build the dialog UI matching the reference image."""
-        main_frame = tk.Frame(self.dialog, bg=self.bg_color, padx=20, pady=20)
-        main_frame.pack(fill="both", expand=True)
-        
-        # ── Connect Password ───────────────────────────────────────────────────
-        password_frame = tk.Frame(main_frame, bg=self.bg_color)
-        password_frame.pack(fill="x", pady=(0, 15))
-        
-        tk.Label(
-            password_frame,
-            text="Connect Password:",
-            bg=self.bg_color,
-            fg="black",
-            font=("Arial", 10)
-        ).pack(anchor="w")
-        
-        password_entry = tk.Entry(
-            password_frame,
-            textvariable=self.password,
-            show="*",
-            font=("Arial", 10),
-            relief="solid",
-            borderwidth=1
+        main = QVBoxLayout(self.dialog)
+        main.setContentsMargins(20, 20, 20, 20)
+        main.setSpacing(0)
+
+        def block(label_text, widget, gap_after):
+            main.addWidget(self._field_label(label_text))
+            main.addSpacing(5)
+            main.addWidget(widget)
+            main.addSpacing(gap_after)
+
+        # ── Connect Password ───────────────────────────────────────────
+        self._password_edit = QLineEdit(self.password)
+        self._password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._password_edit.setFont(QFont("Arial", 10))
+        self._password_edit.setStyleSheet(
+            "QLineEdit { background:#ffffff; color:black; border:1px solid #444; padding:2px 4px; }"
         )
-        password_entry.pack(fill="x", pady=(5, 0))
-        
-        # ── Rack Address ───────────────────────────────────────────────────────
-        rack_frame = tk.Frame(main_frame, bg=self.bg_color)
-        rack_frame.pack(fill="x", pady=(0, 15))
-        
-        tk.Label(
-            rack_frame,
-            text="Rack Address:",
-            bg=self.bg_color,
-            fg="black",
-            font=("Arial", 10)
-        ).pack(anchor="w")
-        
-        rack_combo = ttk.Combobox(
-            rack_frame,
-            textvariable=self.rack_address,
-            values=[str(i) for i in range(1, 256)],  # 1-255
-            state="readonly",
-            font=("Arial", 10)
+        block("Connect Password:", self._password_edit, 15)
+
+        # ── Rack Address ───────────────────────────────────────────────
+        self._rack_combo = self._combo(range(1, 256), self.rack_address)   # 1-255
+        block("Rack Address:", self._rack_combo, 15)
+
+        # ── COM Port ───────────────────────────────────────────────────
+        self._com_combo = self._combo(
+            self.available_com_ports if self.available_com_ports else ["COM1"],
+            self.com_port,
         )
-        rack_combo.pack(fill="x", pady=(5, 0))
-        
-        # ── COM Port ───────────────────────────────────────────────────────────
-        com_frame = tk.Frame(main_frame, bg=self.bg_color)
-        com_frame.pack(fill="x", pady=(0, 15))
-        
-        tk.Label(
-            com_frame,
-            text="COM Port:",
-            bg=self.bg_color,
-            fg="black",
-            font=("Arial", 10)
-        ).pack(anchor="w")
-        
-        com_combo = ttk.Combobox(
-            com_frame,
-            textvariable=self.com_port,
-            values=self.available_com_ports if self.available_com_ports else ["COM1"],
-            state="readonly",
-            font=("Arial", 10)
-        )
-        com_combo.pack(fill="x", pady=(5, 0))
-        
-        # ── Baud Rate ─────────────────────────────────────────────────────────
-        baud_frame = tk.Frame(main_frame, bg=self.bg_color)
-        baud_frame.pack(fill="x", pady=(0, 25))
-        
-        tk.Label(
-            baud_frame,
-            text="Baud Rate:",
-            bg=self.bg_color,
-            fg="black",
-            font=("Arial", 10)
-        ).pack(anchor="w")
-        
-        baud_combo = ttk.Combobox(
-            baud_frame,
-            textvariable=self.baud_rate,
-            values=["9600", "19200", "57600", "115200"],  # Fixed typo from 119200 to 19200
-            state="readonly",
-            font=("Arial", 10)
-        )
-        baud_combo.pack(fill="x", pady=(5, 0))
-        
-        # ── Buttons ───────────────────────────────────────────────────────────
-        button_frame = tk.Frame(main_frame, bg=self.bg_color)
-        button_frame.pack(fill="x", pady=(15, 0))
-        
-        # Connect button
-        connect_btn = tk.Button(
-            button_frame,
-            text="Connect",
-            command=self._on_connect,
-            bg="#4a90e2",
-            fg="white",
-            font=("Arial", 10, "bold"),
-            relief="raised",
-            bd=2,
-            padx=20,
-            pady=5,
-            cursor="hand2"
-        )
-        connect_btn.pack(side="left", padx=(0, 8))
-        
-        # Browse button
-        browse_btn = tk.Button(
-            button_frame,
-            text="Browse",
-            command=self._on_browse,
-            bg="#e0e0e0",
-            fg="black",
-            font=("Arial", 10),
-            relief="raised",
-            bd=2,
-            padx=15,
-            pady=5,
-            cursor="hand2"
-        )
-        browse_btn.pack(side="left", padx=(0, 8))
-        
-        # Cancel button
-        cancel_btn = tk.Button(
-            button_frame,
-            text="Cancel",
-            command=self._on_cancel,
-            bg="#e0e0e0",
-            fg="black",
-            font=("Arial", 10),
-            relief="raised",
-            bd=2,
-            padx=15,
-            pady=5,
-            cursor="hand2"
-        )
-        cancel_btn.pack(side="left", padx=(0, 8))
-        
-        # Help button
-        help_btn = tk.Button(
-            button_frame,
-            text="Help",
-            command=self._on_help,
-            bg="#e0e0e0",
-            fg="black",
-            font=("Arial", 10),
-            relief="raised",
-            bd=2,
-            padx=15,
-            pady=5,
-            cursor="hand2"
-        )
-        help_btn.pack(side="right")
-    
+        block("COM Port:", self._com_combo, 15)
+
+        # ── Baud Rate ──────────────────────────────────────────────────
+        self._baud_combo = self._combo(["9600", "19200", "57600", "115200"], self.baud_rate)
+        block("Baud Rate:", self._baud_combo, 25)
+
+        main.addStretch(1)
+
+        # ── Buttons ────────────────────────────────────────────────────
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(self._btn("Connect", self._on_connect, "#4a90e2", "white", True, 20))
+        row.addWidget(self._btn("Browse", self._on_browse, "#e0e0e0", "black", False, 15))
+        row.addWidget(self._btn("Cancel", self._on_cancel, "#e0e0e0", "black", False, 15))
+        row.addStretch(1)
+        row.addWidget(self._btn("Help", self._on_help, "#e0e0e0", "black", False, 15))
+        main.addLayout(row)
+
+    # ------------------------------------------------------------------ #
+
     def _on_connect(self):
         """Handle Connect button click."""
+        self.password = self._password_edit.text()
+        self.rack_address = self._rack_combo.currentText()
+        self.com_port = self._com_combo.currentText()
+        self.baud_rate = self._baud_combo.currentText()
         self.result = {
-            "password": self.password.get(),
-            "rack_address": self.rack_address.get(),
-            "com_port": self.com_port.get(),
-            "baud_rate": self.baud_rate.get()
+            "password": self.password,
+            "rack_address": self.rack_address,
+            "com_port": self.com_port,
+            "baud_rate": self.baud_rate,
         }
-        self.dialog.destroy()
-    
+        self.dialog.accept()
+
     def _on_browse(self):
         """Handle Browse button click."""
         print("Browse clicked")
         # TODO: Implement browse functionality
-    
+
     def _on_cancel(self):
         """Handle Cancel button click."""
         self.result = None
-        self.dialog.destroy()
-    
+        self.dialog.reject()
+
     def _on_help(self):
         """Handle Help button click."""
         print("Help clicked")

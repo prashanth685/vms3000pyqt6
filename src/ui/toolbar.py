@@ -3,34 +3,47 @@ toolbar.py — VMS 3000 Interactive Toolbar
 Provides toolbar icons with connection functionality
 """
 
-import tkinter as tk
-from tkinter import ttk
-import sys
 import os
+import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from PyQt6.QtCore import Qt, QPoint, QSize
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QMenu, QToolButton, QWidget
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from icons import IconPainter
 from src.ui.connection_dialog import ConnectionDialog
 from src.ui.com_port_detector import get_available_com_ports
 
 
-class Toolbar:
+class Toolbar(QFrame):
     """Interactive toolbar with file operations and connection management."""
-    
+
     def __init__(self, parent, bg_color="#f4f6f9"):
+        super().__init__(parent)
         self.parent = parent
         self.bg_color = bg_color
         self.icon_painter = IconPainter(bg_hex=bg_color)
         self._callbacks = {}
-        
-        # Create toolbar frame
-        self.frame = tk.Frame(parent, bg=bg_color, height=40, relief="raised", bd=1)
-        self.frame.pack(side="top", fill="x")
-        self.frame.pack_propagate(False)
-        
+
+        # Create toolbar frame (kept as ``self.frame`` for API compatibility)
+        self.frame = self
+        self.setFixedHeight(40)
+        self.setFrameShape(QFrame.Shape.Panel)
+        self.setFrameShadow(QFrame.Shadow.Raised)
+        self.setStyleSheet(f"Toolbar {{ background:{bg_color}; }}")
+
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(4, 2, 4, 2)
+        self._layout.setSpacing(2)
+
         # Build toolbar buttons
         self._build_toolbar()
-    
+        self._layout.addStretch(1)
+
+        lay = parent.layout() if isinstance(parent, QWidget) else None
+        if lay is not None:
+            lay.addWidget(self)
+
     def _build_toolbar(self):
         """Build toolbar buttons with icons."""
         button_configs = [
@@ -43,187 +56,111 @@ class Toolbar:
             ("copy", "Copy", self._on_copy),
             ("paste", "Paste", self._on_paste),
         ]
-        
+
         for icon_name, tooltip, callback in button_configs:
             self._create_toolbar_button(icon_name, tooltip, callback)
-        
+
         # Add separator
-        separator = tk.Frame(self.frame, bg=self.bg_color, width=2, height=30)
-        separator.pack(side="left", padx=8)
-        
+        sep = QFrame()
+        sep.setFixedSize(2, 30)
+        sep.setStyleSheet(f"background:{self.bg_color};")
+        self._layout.addSpacing(8)
+        self._layout.addWidget(sep)
+        self._layout.addSpacing(8)
+
         # Add connection button with dropdown
         self._create_connection_button()
-    
-    def _create_toolbar_button(self, icon_name, tooltip, callback):
-        """Create a single toolbar button."""
+
+    def _make_button(self, icon_name, fallback_text, tooltip, callback):
+        btn = QToolButton()
         try:
-            icon = self.icon_painter.get(icon_name)
+            pm = self.icon_painter.get(icon_name)
+            btn.setIcon(self.icon_painter.get_icon(icon_name))
+            btn.setIconSize(QSize(pm.width(), pm.height()) / pm.devicePixelRatio())
         except Exception:
             # Fallback if icon fails to load
-            icon = None
-        
-        btn = tk.Button(
-            self.frame,
-            image=icon if icon else None,
-            text=icon_name[0].upper() if not icon else "",
-            command=callback,
-            bg=self.bg_color,
-            relief="flat",
-            bd=0,
-            padx=8,
-            pady=4,
-            cursor="hand2",
-            activebackground="#e2e8f0"
+            btn.setText(fallback_text)
+        btn.setToolTip(tooltip)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(
+            f"QToolButton {{ background:{self.bg_color}; border:none; padding:4px 8px; }}"
+            "QToolButton:hover, QToolButton:pressed { background:#e2e8f0; }"
         )
-        btn.pack(side="left", padx=2)
-        
-        # Add tooltip
-        self._add_tooltip(btn, tooltip)
-        
+        btn.clicked.connect(lambda _c=False, cb=callback: cb())
+        self._layout.addWidget(btn)
         return btn
-    
+
+    def _create_toolbar_button(self, icon_name, tooltip, callback):
+        """Create a single toolbar button."""
+        return self._make_button(icon_name, icon_name[0].upper(), tooltip, callback)
+
     def _create_connection_button(self):
         """Create connection button with dropdown menu."""
-        try:
-            icon = self.icon_painter.get("connection")
-        except Exception:
-            icon = None
-        
-        self.connection_btn = tk.Button(
-            self.frame,
-            image=icon if icon else None,
-            text="🔗" if not icon else "",
-            command=self._show_connection_menu,
-            bg=self.bg_color,
-            relief="flat",
-            bd=0,
-            padx=8,
-            pady=4,
-            cursor="hand2",
-            activebackground="#e2e8f0"
+        self.connection_btn = self._make_button(
+            "connection", "🔗", "Connection", self._show_connection_menu
         )
-        self.connection_btn.pack(side="left", padx=2)
-        self._add_tooltip(self.connection_btn, "Connection")
-    
+
     def _show_connection_menu(self):
         """Show connection dropdown menu."""
-        menu = tk.Menu(self.parent, tearoff=0)
-        menu.add_command(label="Direct connect", command=self._on_direct_connect)
-        menu.add_command(label="Network connect", command=self._on_network_connect)
-        menu.add_separator()
-        menu.add_command(label="Disconnect", command=self._on_disconnect)
-        
+        menu = QMenu(self)
+        menu.addAction("Direct connect").triggered.connect(self._on_direct_connect)
+        menu.addAction("Network connect").triggered.connect(self._on_network_connect)
+        menu.addSeparator()
+        menu.addAction("Disconnect").triggered.connect(self._on_disconnect)
+
         # Position menu below the button
-        try:
-            x = self.connection_btn.winfo_rootx()
-            y = self.connection_btn.winfo_rooty() + self.connection_btn.winfo_height()
-        except Exception:
-            # Fallback if window isn't mapped yet
-            x = self.parent.winfo_rootx() + 100
-            y = self.parent.winfo_rooty() + 50
-        
-        menu.post(x, y)
-    
-    def _add_tooltip(self, widget, text):
-        """Add tooltip to widget."""
-        def on_enter(event):
-            tooltip = tk.Toplevel(self.parent)
-            tooltip.wm_overrideredirect(True)
-            tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
-            
-            label = tk.Label(
-                tooltip,
-                text=text,
-                bg="#ffffe0",
-                fg="black",
-                relief="solid",
-                borderwidth=1,
-                font=("Arial", 8)
-            )
-            label.pack()
-            
-            widget.tooltip = tooltip
-        
-        def on_leave(event):
-            if hasattr(widget, 'tooltip'):
-                widget.tooltip.destroy()
-                del widget.tooltip
-        
-        widget.bind("<Enter>", on_enter)
-        widget.bind("<Leave>", on_leave)
-    
+        menu.exec(self.connection_btn.mapToGlobal(QPoint(0, self.connection_btn.height())))
+
     # ── Callback methods ──────────────────────────────────────────────────────
+
+    def _dispatch(self, name, label):
+        if name in self._callbacks:
+            self._callbacks[name]()
+        else:
+            print(f"{label} clicked")
+
     def _on_new(self):
-        if "new" in self._callbacks:
-            self._callbacks["new"]()
-        else:
-            print("New clicked")
-    
+        self._dispatch("new", "New")
+
     def _on_open(self):
-        if "open" in self._callbacks:
-            self._callbacks["open"]()
-        else:
-            print("Open clicked")
-    
+        self._dispatch("open", "Open")
+
     def _on_save(self):
-        if "save" in self._callbacks:
-            self._callbacks["save"]()
-        else:
-            print("Save clicked")
-    
+        self._dispatch("save", "Save")
+
     def _on_print(self):
-        if "print" in self._callbacks:
-            self._callbacks["print"]()
-        else:
-            print("Print clicked")
-    
+        self._dispatch("print", "Print")
+
     def _on_settings(self):
-        if "settings" in self._callbacks:
-            self._callbacks["settings"]()
-        else:
-            print("Settings clicked")
-    
+        self._dispatch("settings", "Settings")
+
     def _on_cut(self):
-        if "cut" in self._callbacks:
-            self._callbacks["cut"]()
-        else:
-            print("Cut clicked")
-    
+        self._dispatch("cut", "Cut")
+
     def _on_copy(self):
-        if "copy" in self._callbacks:
-            self._callbacks["copy"]()
-        else:
-            print("Copy clicked")
-    
+        self._dispatch("copy", "Copy")
+
     def _on_paste(self):
-        if "paste" in self._callbacks:
-            self._callbacks["paste"]()
-        else:
-            print("Paste clicked")
-    
+        self._dispatch("paste", "Paste")
+
     def _on_direct_connect(self):
         """Open direct connection dialog."""
         com_ports = get_available_com_ports()
-        dialog = ConnectionDialog(self.parent, com_ports)
+        dialog = ConnectionDialog(self.window(), com_ports)
         result = dialog.show()
         if result:
             print(f"Direct connect: {result}")
             if "direct_connect" in self._callbacks:
                 self._callbacks["direct_connect"](result)
-    
+
     def _on_network_connect(self):
-        if "network_connect" in self._callbacks:
-            self._callbacks["network_connect"]()
-        else:
-            print("Network connect clicked")
-    
+        self._dispatch("network_connect", "Network connect")
+
     def _on_disconnect(self):
-        if "disconnect" in self._callbacks:
-            self._callbacks["disconnect"]()
-        else:
-            print("Disconnect clicked")
-    
+        self._dispatch("disconnect", "Disconnect")
+
     # ── Public API for callbacks ───────────────────────────────────────────────
+
     def set_callback(self, action, callback):
         """Set callback for toolbar action."""
         self._callbacks[action] = callback

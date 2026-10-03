@@ -1,7 +1,24 @@
-import tkinter as tk
-from tkinter import ttk
-import tkinter.font as tkfont
+"""
+channel_configuration.py — VMS 3000  •  Channel-N Configuration dialog
+(Transducer setup / Variables + Alarms)
+"""
 
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFrame, QGridLayout,
+    QGroupBox, QHBoxLayout, QLabel, QStackedWidget, QTabBar, QVBoxLayout,
+    QWidget,
+)
+
+from qt_common import (
+    ClassicTitleBar, center_on_screen, checkbox_qss, field_palette, char_width, classic_combo_qss,
+    fixed_at_least, pick_font, plain_label, raised_button, sunken_label,
+)
 
 # ══════════════════════════════════════════════════════════════════════════
 #  PALETTE — kept consistent with proximiter12m_ridial.py / sixm_option.py
@@ -42,6 +59,23 @@ C = {
 FONT_NAME = "Segoe UI"
 
 
+def classic_group(title: str, font) -> QGroupBox:
+    """Etched group box with a plain black bold title (classic look)."""
+    g = QGroupBox(f" {title} ")
+    g.setFont(font)
+    g.setStyleSheet(f"""
+        QGroupBox {{
+            background:{C['group_bg']}; border:1px groove {C['group_border']};
+            margin-top:9px; padding:10px 10px 8px 10px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin; subcontrol-position: top left;
+            left:8px; padding:0 2px; color:{C['group_label']};
+        }}
+    """)
+    return g
+
+
 class ChannelConfigurationDialog:
     """Channel-N Configuration dialog (Transducer setup / Variables + Alarms)."""
 
@@ -51,481 +85,339 @@ class ChannelConfigurationDialog:
 
     def __init__(self, parent, channel_num, slot_num=6, fonts=None,
                  rack_type="", active=True, on_ok=None):
-        self._parent      = parent
+        self._parent = parent
         self._channel_num = channel_num
-        self._slot_num     = slot_num
-        self._fonts        = fonts if isinstance(fonts, dict) else {}
-        self._rack_type    = rack_type
-        self._active       = active
-        self._dialog        = None
+        self._slot_num = slot_num
+        self._fonts = fonts if isinstance(fonts, dict) else {}
+        self._rack_type = rack_type
+        self._active = active
+        self._dialog = None
         self._on_ok_callback = on_ok
 
-        self._tabs         = {}   # name -> content frame
-        self._tab_buttons   = {}  # name -> tab button widget
-        self._active_tab   = None
-
-    def _f(self, key, family=FONT_NAME, size=9, weight="normal", slant="roman"):
-        if not isinstance(self._fonts, dict):
-            self._fonts = {}
-        font = self._fonts.get(key)
-        if font is None:
-            font = tkfont.Font(family=family, size=size, weight=weight, slant=slant)
-            self._fonts[key] = font
-        return font
+    def _f(self, key, size=9, bold=False, italic=False, family=FONT_NAME):
+        return pick_font(self._fonts, key, family, size, bold, italic)
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
     # ------------------------------------------------------------------ #
 
     def show(self):
-        self._dialog = tk.Toplevel(self._parent)
-        self._dialog.title(f"Channel-{self._channel_num} Configuration")
-        self._dialog.configure(bg=C["win_bg"])
-        self._dialog.resizable(False, False)
-        self._dialog.transient(self._parent)
-        self._dialog.grab_set()
+        d = QDialog(self._parent)
+        self._dialog = d
+        d.setObjectName("chanDlg")
+        d.setWindowTitle(f"Channel-{self._channel_num} Configuration")
+        d.setModal(True)
+        d.setStyleSheet(f"QDialog#chanDlg {{ background:{C['win_bg']}; }}"
+                        f"QLabel {{ background:transparent; }}"
+                        + checkbox_qss(C['text']))
 
-        self._style_ttk()
+        root = QVBoxLayout(d)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        self._create_titlebar()
+        root.addWidget(ClassicTitleBar(
+            f"Channel-{self._channel_num} Configuration", self._on_cancel,
+            self._f("title", 10, bold=True), self._f("close", 8),
+        ))
 
-        body = tk.Frame(self._dialog, bg=C["win_bg"], padx=14, pady=10)
-        body.pack(fill="both", expand=True)
+        body = QVBoxLayout()
+        body.setContentsMargins(14, 10, 14, 10)
+        root.addLayout(body, 1)
 
         self._create_identity_row(body)
-
-        self._create_tab_strip(body)
-        self._create_tab_panels(body)
-
+        self._create_tabs(body)
         self._create_buttons(body)
 
-        self._select_tab("Variables + Alarms")
+        self._tabbar.setCurrentIndex(1)     # "Variables + Alarms"
 
-        self._dialog.update_idletasks()
-        w = self._dialog.winfo_reqwidth()
-        h = self._dialog.winfo_reqheight()
-        sw = self._dialog.winfo_screenwidth()
-        sh = self._dialog.winfo_screenheight()
-        self._dialog.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        d.adjustSize()
+        d.setFixedSize(d.sizeHint())
+        center_on_screen(d)
+        d.exec()
 
     # ------------------------------------------------------------------ #
-    #  ttk styling                                                         #
+    #  Small widget helpers                                                #
     # ------------------------------------------------------------------ #
 
-    def _style_ttk(self):
-        style = ttk.Style(self._dialog)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
+    def _lbl(self, text, bold=False, size=9, italic=False, fg=None, wrap=False):
+        l = plain_label(text, self._f("label_b" if bold else "field", size, bold, italic),
+                        fg or C["text"])
+        l.setWordWrap(wrap)
+        return l
 
-        style.configure(
-            "White.TCombobox",
-            fieldbackground=C["combo_white_bg"],
-            background=C["btn_face"],
-            foreground=C["combo_white_fg"],
-            arrowcolor=C["text"],
-            bordercolor=C["field_border"],
-            lightcolor=C["combo_white_bg"],
-            darkcolor=C["field_border"],
-            padding=2,
-        )
-        style.map("White.TCombobox",
-                  fieldbackground=[("readonly", C["combo_white_bg"])],
-                  foreground=[("readonly", C["combo_white_fg"])])
+    def _group(self, title):
+        return classic_group(title, self._f("group", 9, bold=True))
 
-    # ------------------------------------------------------------------ #
-    #  Titlebar                                                            #
-    # ------------------------------------------------------------------ #
+    def _btn(self, text, cmd, width=None, enabled=True):
+        return raised_button(text, cmd, width_chars=width, enabled=enabled,
+                             font=self._f("field", 9), colors=C)
 
-    def _create_titlebar(self):
-        bar = tk.Frame(self._dialog, bg=C["titlebar"], height=26)
-        bar.pack(fill="x")
-        bar.pack_propagate(False)
+    def _combo(self, values, default, chars=20):
+        cb = QComboBox()
+        f = self._f("field", 9)
+        cb.setFont(f)
+        cb.addItems(values)
+        cb.setCurrentText(default)
+        cb.setStyleSheet(classic_combo_qss(C["combo_white_bg"], C["combo_white_fg"],
+                                           C["field_border"], C["btn_face"],
+                                           C["titlebar"], "#ffffff"))
+        cb.setMinimumWidth(char_width(f, chars) + 28)
+        return cb
 
-        tk.Label(
-            bar, text=f"  Channel-{self._channel_num} Configuration",
-            font=self._f("title", size=10, weight="bold"),
-            bg=C["titlebar"], fg=C["titlebar_text"], anchor="w",
-        ).pack(side="left", fill="both", expand=True)
-
-        tk.Button(
-            bar, text="\u2715", font=self._f("close", size=8),
-            bg=C["close_bg"], fg="#ffffff", bd=1, relief="raised",
-            width=3, command=self._on_cancel,
-        ).pack(side="right", padx=4, pady=3)
-
-    # ------------------------------------------------------------------ #
-    #  Group-box helper                                                    #
-    # ------------------------------------------------------------------ #
-
-    def _group(self, parent, title):
-        return tk.LabelFrame(
-            parent, text=f" {title} ",
-            font=self._f("group", size=9, weight="bold"),
-            bg=C["group_bg"], fg=C["group_label"],
-            bd=1, relief="groove",
-            highlightbackground=C["group_border"],
-            padx=10, pady=8,
-        )
+    def _spinbox(self, value, chars=5, frm=-999, to=999):
+        """Small numeric field (Clamp Value / Zero Position / Delay / etc.)."""
+        sb = QDoubleSpinBox()
+        text = str(value)
+        sb.setDecimals(len(text.split(".")[1]) if "." in text else 0)
+        sb.setRange(frm, to)
+        sb.setSingleStep(1)
+        sb.setValue(float(text))
+        f = self._f("field", 9)
+        sb.setFont(f)
+        field_palette(sb, C["field_bg"], C["text"])
+        sb.setFixedWidth(char_width(f, chars) + 34)
+        return sb
 
     # ------------------------------------------------------------------ #
     #  Identity row — CHANNEL / 'ACTIVE' / SLOT / RACK TYPE                #
     # ------------------------------------------------------------------ #
 
     def _create_identity_row(self, parent):
-        row = tk.Frame(parent, bg=C["win_bg"])
-        row.pack(fill="x", pady=(0, 8))
+        row = QHBoxLayout()
+        row.setSpacing(0)
 
-        tk.Label(
-            row, text="CHANNEL", bg=C["win_bg"], fg=C["text"],
-            font=self._f("label_b", size=9, weight="bold"),
-        ).pack(side="left")
-
-        tk.Label(
-            row, text=str(self._channel_num), bg=C["field_bg"], fg=C["text"],
-            font=self._f("field", size=9, weight="bold"),
-            width=3, relief="sunken", bd=2,
-            highlightthickness=1, highlightbackground=C["field_border"],
-        ).pack(side="left", padx=(6, 10))
+        row.addWidget(self._lbl("CHANNEL", bold=True))
+        row.addSpacing(6)
+        row.addWidget(sunken_label(str(self._channel_num), self._f("field", 9, True),
+                                   bg=C["field_bg"], border=C["field_border"], chars=3,
+                                   align=Qt.AlignmentFlag.AlignCenter))
+        row.addSpacing(10)
 
         status = "'ACTIVE'" if self._active else "'INACTIVE'"
-        tk.Label(
-            row, text=status, bg=C["field_bg"], fg=C["text"],
-            font=self._f("field", size=9, weight="bold"),
-            width=10, relief="sunken", bd=2,
-            highlightthickness=1, highlightbackground=C["field_border"],
-        ).pack(side="left", padx=(0, 30))
+        row.addWidget(sunken_label(status, self._f("field", 9, True),
+                                   bg=C["field_bg"], border=C["field_border"], chars=10,
+                                   align=Qt.AlignmentFlag.AlignCenter))
+        row.addSpacing(30)
 
-        tk.Label(
-            row, text="SLOT", bg=C["win_bg"], fg=C["text"],
-            font=self._f("label_b", size=9, weight="bold"),
-        ).pack(side="left")
+        row.addWidget(self._lbl("SLOT", bold=True))
+        row.addSpacing(6)
+        row.addWidget(sunken_label(str(self._slot_num), self._f("field", 9),
+                                   bg=C["field_bg"], border=C["field_border"], chars=6,
+                                   align=Qt.AlignmentFlag.AlignCenter))
+        row.addSpacing(30)
 
-        tk.Label(
-            row, text=str(self._slot_num), bg=C["field_bg"], fg=C["text"],
-            font=self._f("field", size=9),
-            width=6, relief="sunken", bd=2,
-            highlightthickness=1, highlightbackground=C["field_border"],
-        ).pack(side="left", padx=(6, 30))
-
-        tk.Label(
-            row, text="RACK TYPE", bg=C["win_bg"], fg=C["text"],
-            font=self._f("label_b", size=9, weight="bold"),
-        ).pack(side="left")
-
-        tk.Label(
-            row, text=self._rack_type, bg=C["field_bg"], fg=C["text"],
-            font=self._f("field", size=9),
-            width=16, anchor="w", relief="sunken", bd=2,
-            highlightthickness=1, highlightbackground=C["field_border"],
-        ).pack(side="left", padx=(6, 0))
+        row.addWidget(self._lbl("RACK TYPE", bold=True))
+        row.addSpacing(6)
+        row.addWidget(sunken_label(self._rack_type, self._f("field", 9),
+                                   bg=C["field_bg"], border=C["field_border"], chars=16))
+        row.addStretch(1)
+        parent.addLayout(row)
+        parent.addSpacing(8)
 
     # ------------------------------------------------------------------ #
-    #  Tab strip — real switching, not a "card"                          #
+    #  Tabs — real switching, not a "card"                                 #
     # ------------------------------------------------------------------ #
 
-    def _create_tab_strip(self, parent):
-        strip = tk.Frame(parent, bg=C["win_bg"])
-        strip.pack(fill="x")
+    def _create_tabs(self, parent):
+        self._tabbar = QTabBar()
+        self._tabbar.setDrawBase(False)
+        self._tabbar.setFont(self._f("tab", 9))
+        self._tabbar.addTab("Transducer setup")
+        self._tabbar.addTab("Variables + Alarms")
+        self._tabbar.setStyleSheet(f"""
+            QTabBar::tab {{
+                background:{C['tab_unsel_bg']}; color:{C['text']};
+                border:1px outset {C['tab_border']}; padding:4px 10px; margin-right:2px;
+            }}
+            QTabBar::tab:selected {{
+                background:{C['tab_sel_bg']}; font-weight:bold;
+                border:1px solid {C['tab_border']}; border-bottom-color:{C['tab_sel_bg']};
+            }}
+        """)
+        parent.addWidget(self._tabbar)
 
-        for name in ("Transducer setup", "Variables + Alarms"):
-            btn = tk.Label(
-                strip, text=name,
-                font=self._f("tab", size=9, weight="normal"),
-                bg=C["tab_unsel_bg"], fg=C["text"],
-                bd=1, relief="raised",
-                padx=10, pady=4, cursor="hand2",
-            )
-            btn.pack(side="left", padx=(0, 2))
-            btn.bind("<Button-1>", lambda e, n=name: self._select_tab(n))
-            self._tab_buttons[name] = btn
-
-    def _create_tab_panels(self, parent):
-        # Both panels occupy the SAME grid cell; selecting a tab just
-        # raises the corresponding frame to the front — an immediate
-        # switch, no transition/animation.
-        container = tk.Frame(parent, bg=C["win_bg"])
-        container.pack(fill="both", expand=True)
-        container.grid_rowconfigure(0, weight=1)
-        container.grid_columnconfigure(0, weight=1)
-
-        transducer = tk.Frame(container, bg=C["win_bg"])
-        transducer.grid(row=0, column=0, sticky="nsew")
-        self._build_transducer_setup_tab(transducer)
-        self._tabs["Transducer setup"] = transducer
-
-        variables = tk.Frame(container, bg=C["win_bg"])
-        variables.grid(row=0, column=0, sticky="nsew")
-        self._build_variables_alarms_tab(variables)
-        self._tabs["Variables + Alarms"] = variables
-
-    def _select_tab(self, name):
-        """Switch the visible tab panel. This is a plain raise/lower —
-        the exact same mechanism as clicking a tab in any standard
-        Windows tab control, not a stylised card transition."""
-        if self._active_tab == name:
-            return
-        self._active_tab = name
-
-        for tab_name, btn in self._tab_buttons.items():
-            selected = (tab_name == name)
-            btn.config(
-                bg=C["tab_sel_bg"] if selected else C["tab_unsel_bg"],
-                font=self._f("tab", size=9, weight="bold" if selected else "normal"),
-                relief="solid" if selected else "raised",
-            )
-
-        self._tabs[name].tkraise()
+        # Both panels occupy the same cell; selecting a tab swaps the page.
+        stack = QStackedWidget()
+        t = QWidget()
+        self._build_transducer_setup_tab(t)
+        v = QWidget()
+        self._build_variables_alarms_tab(v)
+        stack.addWidget(t)
+        stack.addWidget(v)
+        # size to the larger page so the dialog doesn't jump between tabs
+        stack.setSizePolicy(stack.sizePolicy().horizontalPolicy(),
+                            stack.sizePolicy().verticalPolicy())
+        parent.addWidget(stack, 1)
+        self._tabbar.currentChanged.connect(stack.setCurrentIndex)
+        self._stack = stack
 
     # ------------------------------------------------------------------ #
-    #  "Variables + Alarms" tab — pixel-matched to the reference           #
+    #  "Variables + Alarms" tab                                            #
     # ------------------------------------------------------------------ #
 
-    def _build_variables_alarms_tab(self, parent):
-        panel = self._group(parent, "Variables + Alarm")
-        panel.pack(fill="both", expand=True, pady=(0, 8))
+    def _build_variables_alarms_tab(self, page):
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 8)
+        panel = self._group("Variables + Alarm")
+        lay.addWidget(panel)
+        pl = QVBoxLayout(panel)
+        pl.setSpacing(4)
 
-        top = tk.Frame(panel, bg=C["win_bg"])
-        top.pack(fill="x")
+        top = QHBoxLayout()
+        pl.addLayout(top)
 
         # ---- Enable: Full Scale Range / Clamp Value for Direct & Gap ----
-        enable = self._group(top, "Enable")
-        enable.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        enable = self._group("Enable")
+        top.addWidget(enable, 1)
+        grid = QGridLayout(enable)
+        grid.setHorizontalSpacing(12)
 
-        hdr = tk.Frame(enable, bg=C["win_bg"])
-        hdr.grid(row=0, column=0, columnspan=3, sticky="w")
-        tk.Label(hdr, text="", bg=C["win_bg"], width=7).pack(side="left")
-        tk.Label(
-            hdr, text="Full Scale Range", bg=C["win_bg"], fg=C["text"],
-            font=self._f("label_b", size=9, weight="bold"),
-        ).pack(side="left", padx=(24, 40))
-        tk.Label(
-            hdr, text="Clamp Value", bg=C["win_bg"], fg=C["text"],
-            font=self._f("label_b", size=9, weight="bold"),
-        ).pack(side="left")
+        grid.addWidget(self._lbl("Full Scale Range", bold=True), 0, 1)
+        grid.addWidget(self._lbl("Clamp Value", bold=True), 0, 2)
 
         direct_scale_values = [
             "0-10 mil pp", "0-15 mil pp", "0-20 mil pp", "0-100 mil pp",
             "0-150 \u00b5m pp", "0-200 \u00b5m pp", "0-400 \u00b5m pp", "0-500 \u00b5m pp",
         ]
-        # Gap "full scale range" on this module is a DC bias-voltage
-        # range rather than a mil/µm span — not shown fully in the
-        # screenshot beyond "-24Vdc", so a plausible preset list is used.
+        # Gap "full scale range" is a DC bias-voltage range rather than a
+        # mil/µm span, so a plausible preset list is used.
         gap_scale_values = ["-24Vdc", "-20Vdc", "-18Vdc", "-16Vdc", "-12Vdc", "-10Vdc", "-8Vdc"]
 
         self._direct_row = self._build_enable_row(
-            enable, row=1, label="Direct",
-            scale_values=direct_scale_values, scale_default="0-10 mil pp",
-            clamp_default="0",
-        )
+            grid, 1, "Direct", direct_scale_values, "0-10 mil pp", "0")
         self._gap_row = self._build_enable_row(
-            enable, row=2, label="Gap",
-            scale_values=gap_scale_values, scale_default="-24Vdc",
-            clamp_default="0",
-        )
+            grid, 2, "Gap", gap_scale_values, "-24Vdc", "0")
 
         # ---- Zero Position (Gap) ----
-        zero = self._group(top, "Zero Position")
-        zero.pack(side="left", fill="both", padx=(0, 0))
-
-        zrow = tk.Frame(zero, bg=C["win_bg"])
-        zrow.pack(fill="x", pady=(2, 8))
-        tk.Label(
-            zrow, text="Zero Position\n(Gap)", bg=C["win_bg"], fg=C["text"],
-            font=self._f("field", size=9), justify="left",
-        ).pack(side="left")
-
-        zspin = self._spinbox(zrow, value="-9.75", width=6)
-        zspin.pack(side="left", padx=(8, 4))
-        tk.Label(
-            zrow, text="Volts", bg=C["win_bg"], fg=C["text"],
-            font=self._f("field", size=9),
-        ).pack(side="left")
-
-        self._raised_btn(zero, "Adjust", None, width=12, enabled=False).pack(pady=(0, 2))
+        zero = self._group("Zero Position")
+        top.addWidget(zero)
+        zl = QVBoxLayout(zero)
+        zrow = QHBoxLayout()
+        zrow.addWidget(self._lbl("Zero Position\n(Gap)"))
+        zrow.addSpacing(8)
+        self._zero_spin = self._spinbox("-9.75", chars=6)
+        zrow.addWidget(self._zero_spin)
+        zrow.addSpacing(4)
+        zrow.addWidget(self._lbl("Volts"))
+        zl.addLayout(zrow)
+        zl.addWidget(self._btn("Adjust", None, width=12, enabled=False),
+                     0, Qt.AlignmentFlag.AlignHCenter)
 
         # ---- Alert Latching / Danger Latching ----
-        latch_row = tk.Frame(panel, bg=C["win_bg"])
-        latch_row.pack(fill="x", pady=(8, 4))
-
-        tk.Checkbutton(
-            latch_row, text="Alert Latching",
-            bg=C["win_bg"], fg=C["text"], activebackground=C["win_bg"],
-            font=self._f("field", size=9),
-        ).pack(side="left")
-
-        tk.Checkbutton(
-            latch_row, text="Danger Latching",
-            bg=C["win_bg"], fg=C["text"], activebackground=C["win_bg"],
-            font=self._f("field", size=9),
-        ).pack(side="left", padx=(30, 0))
+        latch = QHBoxLayout()
+        latch.setContentsMargins(0, 8, 0, 4)
+        self._alert_latch = QCheckBox("Alert Latching")
+        self._alert_latch.setFont(self._f("field", 9))
+        self._danger_latch = QCheckBox("Danger Latching")
+        self._danger_latch.setFont(self._f("field", 9))
+        latch.addWidget(self._alert_latch)
+        latch.addSpacing(30)
+        latch.addWidget(self._danger_latch)
+        latch.addStretch(1)
+        pl.addLayout(latch)
 
         # ---- Delay / Trip Multiply ----
-        mid = tk.Frame(panel, bg=C["win_bg"])
-        mid.pack(fill="x", pady=(4, 4))
+        mid = QHBoxLayout()
+        pl.addLayout(mid)
 
-        delay = self._group(mid, "Delay")
-        delay.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        delay = self._group("Delay")
+        mid.addWidget(delay, 1)
+        dl = QVBoxLayout(delay)
+        for name, val, hint in (("Alert", "3", "1 - 60 s"), ("Danger", "1", "1.0 - 60.0")):
+            r = QHBoxLayout()
+            l = self._lbl(name)
+            l.setFixedWidth(char_width(self._f("field", 9), 7))
+            r.addWidget(l)
+            r.addWidget(self._spinbox(val, chars=4))
+            r.addSpacing(6)
+            r.addWidget(self._lbl(hint))
+            r.addStretch(1)
+            dl.addLayout(r)
 
-        alert_row = tk.Frame(delay, bg=C["win_bg"])
-        alert_row.pack(fill="x", pady=(0, 6))
-        tk.Label(alert_row, text="Alert", bg=C["win_bg"], fg=C["text"],
-                 font=self._f("field", size=9), width=7, anchor="w").pack(side="left")
-        self._spinbox(alert_row, value="3", width=4).pack(side="left", padx=(0, 6))
-        tk.Label(alert_row, text="1 - 60 s", bg=C["win_bg"], fg=C["text"],
-                 font=self._f("field", size=9)).pack(side="left")
-
-        danger_row = tk.Frame(delay, bg=C["win_bg"])
-        danger_row.pack(fill="x")
-        tk.Label(danger_row, text="Danger", bg=C["win_bg"], fg=C["text"],
-                 font=self._f("field", size=9), width=7, anchor="w").pack(side="left")
-        self._spinbox(danger_row, value="1", width=4).pack(side="left", padx=(0, 6))
-        tk.Label(danger_row, text="1.0 - 60.0", bg=C["win_bg"], fg=C["text"],
-                 font=self._f("field", size=9)).pack(side="left")
-
-        trip = self._group(mid, "Trip Multiply")
-        trip.pack(side="left", fill="both")
-
-        trip_row = tk.Frame(trip, bg=C["win_bg"])
-        trip_row.pack(fill="x")
-        self._spinbox(trip_row, value="1", width=4).pack(side="left", padx=(0, 6))
-        tk.Label(
-            trip_row, text="1 to 3 (Step of\n0.25)", bg=C["win_bg"], fg=C["text"],
-            font=self._f("field", size=9), justify="left",
-        ).pack(side="left")
+        trip = self._group("Trip Multiply")
+        mid.addWidget(trip)
+        tl = QHBoxLayout(trip)
+        tl.addWidget(self._spinbox("1", chars=4))
+        tl.addSpacing(6)
+        tl.addWidget(self._lbl("1 to 3 (Step of\n0.25)"))
 
         # ---- Recorder Output ----
-        rec = self._group(panel, "Recorder Output")
-        rec.pack(fill="x", pady=(4, 0))
+        rec = self._group("Recorder Output")
+        pl.addWidget(rec)
+        rl = QHBoxLayout(rec)
+        rl.addWidget(self._combo(["NONE", "Recorder 1", "Recorder 2"], "NONE", 20))
+        rl.addStretch(1)
 
-        rec_combo = ttk.Combobox(
-            rec, values=["NONE", "Recorder 1", "Recorder 2"],
-            font=self._f("field", size=9), state="readonly",
-            style="White.TCombobox", width=20,
-        )
-        rec_combo.set("NONE")
-        rec_combo.pack(anchor="w", padx=2, pady=2)
-
-    def _build_enable_row(self, parent, row, label, scale_values, scale_default, clamp_default):
-        tk.Label(
-            parent, text=label, bg=C["win_bg"], fg=C["text"],
-            font=self._f("field", size=9), width=7, anchor="w",
-        ).grid(row=row, column=0, sticky="w", pady=4)
-
-        scale_combo = ttk.Combobox(
-            parent, values=scale_values, font=self._f("field", size=9),
-            state="readonly", style="White.TCombobox", width=14,
-        )
-        scale_combo.set(scale_default)
-        scale_combo.grid(row=row, column=1, sticky="w", padx=(0, 30), pady=4)
-
-        clamp_spin = self._spinbox(parent, value=clamp_default, width=5)
-        clamp_spin.grid(row=row, column=2, sticky="w", pady=4)
-
+    def _build_enable_row(self, grid, row, label, scale_values, scale_default, clamp_default):
+        l = self._lbl(label)
+        l.setFixedWidth(char_width(self._f("field", 9), 7))
+        grid.addWidget(l, row, 0)
+        scale_combo = self._combo(scale_values, scale_default, 14)
+        grid.addWidget(scale_combo, row, 1)
+        clamp_spin = self._spinbox(clamp_default, chars=5)
+        grid.addWidget(clamp_spin, row, 2)
         return scale_combo, clamp_spin
 
     # ------------------------------------------------------------------ #
     #  "Transducer setup" tab — placeholder (not shown in screenshots)    #
     # ------------------------------------------------------------------ #
 
-    def _build_transducer_setup_tab(self, parent):
-        panel = self._group(parent, "Transducer Setup")
-        panel.pack(fill="both", expand=True, pady=(0, 8))
+    def _build_transducer_setup_tab(self, page):
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 8)
+        panel = self._group("Transducer Setup")
+        lay.addWidget(panel)
+        pl = QVBoxLayout(panel)
 
-        tk.Label(
-            panel,
-            text=("Transducer setup fields were not visible in the reference\n"
-                  "screenshots (both were captured on the Variables + Alarms tab).\n"
-                  "Placeholder fields are shown below — replace with the real\n"
-                  "labels/values whenever available."),
-            bg=C["win_bg"], fg=C["text_dim"],
-            font=self._f("field", size=8, slant="italic"),
-            justify="left",
-        ).pack(anchor="w", pady=(0, 10))
+        pl.addWidget(self._lbl(
+            "Transducer setup fields were not visible in the reference\n"
+            "screenshots (both were captured on the Variables + Alarms tab).\n"
+            "Placeholder fields are shown below — replace with the real\n"
+            "labels/values whenever available.",
+            size=8, italic=True, fg=C["text_dim"]))
+        pl.addSpacing(10)
 
-        grid = tk.Frame(panel, bg=C["win_bg"])
-        grid.pack(fill="x")
+        grid = QGridLayout()
+        pl.addLayout(grid)
+        pl.addStretch(1)
 
-        def _row(r, label, values, default):
-            tk.Label(
-                grid, text=label, bg=C["win_bg"], fg=C["text"],
-                font=self._f("field", size=9), width=20, anchor="w",
-            ).grid(row=r, column=0, sticky="w", pady=4)
-            combo = ttk.Combobox(
-                grid, values=values, font=self._f("field", size=9),
-                state="readonly", style="White.TCombobox", width=20,
-            )
-            combo.set(default)
-            combo.grid(row=r, column=1, sticky="w", pady=4)
-            return combo
-
-        _row(0, "Transducer Type", ["Standard Proximitor", "Reverse Mount", "Extended Range"], "Standard Proximitor")
-        _row(1, "Probe Type", ["5 mm", "8 mm", "11 mm"], "8 mm")
-        _row(2, "Extension Cable Length", ["1 m", "3 m", "5 m", "9 m"], "5 m")
-        _row(3, "Sensitivity", ["100 mV/mil", "200 mV/mil", "7.87 mV/\u00b5m"], "200 mV/mil")
-
-    # ------------------------------------------------------------------ #
-    #  Small spinbox helper (Clamp Value / Zero Position / Delay / etc.)  #
-    # ------------------------------------------------------------------ #
-
-    def _spinbox(self, parent, value, width=5, frm=-999, to=999):
-        sb = tk.Spinbox(
-            parent, from_=frm, to=to, width=width,
-            font=self._f("field", size=9),
-            bg=C["field_bg"], fg=C["text"],
-            relief="sunken", bd=2,
-            highlightthickness=1, highlightbackground=C["field_border"],
-            buttonbackground=C["btn_face"],
-        )
-        sb.delete(0, "end")
-        sb.insert(0, value)
-        return sb
-
-    # ------------------------------------------------------------------ #
-    #  Classic raised, beveled button                                      #
-    # ------------------------------------------------------------------ #
-
-    def _raised_btn(self, parent, text, cmd, width=None, enabled=True):
-        b = tk.Button(
-            parent, text=text, command=cmd,
-            font=self._f("field", size=9),
-            bg=C["btn_face"], fg=C["text"],
-            activebackground=C["btn_press"], activeforeground=C["text"],
-            disabledforeground=C["btn_disabled_fg"],
-            relief="raised", bd=2,
-            highlightthickness=1, highlightbackground=C["btn_border"],
-            width=width, state="normal" if enabled else "disabled",
-            cursor="hand2" if enabled else "arrow",
-        )
-        b.bind("<Enter>", lambda e: b.config(bg=C["btn_hover"]) if str(b["state"]) == "normal" else None)
-        b.bind("<Leave>", lambda e: b.config(bg=C["btn_face"]))
-        return b
+        rows = [
+            ("Transducer Type", ["Standard Proximitor", "Reverse Mount", "Extended Range"], "Standard Proximitor"),
+            ("Probe Type", ["5 mm", "8 mm", "11 mm"], "8 mm"),
+            ("Extension Cable Length", ["1 m", "3 m", "5 m", "9 m"], "5 m"),
+            ("Sensitivity", ["100 mV/mil", "200 mV/mil", "7.87 mV/\u00b5m"], "200 mV/mil"),
+        ]
+        for r, (label, values, default) in enumerate(rows):
+            l = self._lbl(label)
+            l.setFixedWidth(char_width(self._f("field", 9), 20))
+            grid.addWidget(l, r, 0)
+            grid.addWidget(self._combo(values, default, 20), r, 1)
+        grid.setColumnStretch(2, 1)
 
     # ------------------------------------------------------------------ #
     #  Bottom button bar                                                   #
     # ------------------------------------------------------------------ #
 
     def _create_buttons(self, parent):
-        bar = tk.Frame(parent, bg=C["win_bg"])
-        bar.pack(fill="x", pady=(4, 0))
+        bar = QHBoxLayout()
+        bar.setContentsMargins(0, 4, 0, 0)
 
-        left = tk.Frame(bar, bg=C["win_bg"])
-        left.pack(side="left")
-        self._raised_btn(left, "Ok", self._on_ok, width=10).pack(side="left")
-        self._raised_btn(left, "Set defaults", self._on_set_defaults, width=12).pack(side="left", padx=(8, 0))
-        self._raised_btn(left, "Cancel", self._on_cancel, width=10).pack(side="left", padx=(8, 0))
+        bar.addWidget(self._btn("Ok", self._on_ok, width=10))
+        bar.addSpacing(8)
+        bar.addWidget(self._btn("Set defaults", self._on_set_defaults, width=12))
+        bar.addSpacing(8)
+        bar.addWidget(self._btn("Cancel", self._on_cancel, width=10))
+        bar.addSpacing(40)
+        bar.addWidget(self._btn("Print", self._on_print, width=10))
+        bar.addSpacing(8)
+        bar.addWidget(self._btn("Help", self._on_help, width=10))
+        bar.addStretch(1)
 
-        mid = tk.Frame(bar, bg=C["win_bg"])
-        mid.pack(side="left", padx=(40, 0))
-        self._raised_btn(mid, "Print", self._on_print, width=10).pack(side="left")
-        self._raised_btn(mid, "Help", self._on_help, width=10).pack(side="left", padx=(8, 0))
-
-        tk.Label(
-            bar, text="VMS 3000",
-            font=self._f("logo", family="Segoe UI", size=15, weight="bold", slant="italic"),
-            bg=C["win_bg"], fg=C["vms_logo"],
-        ).pack(side="right")
+        logo = QLabel("VMS 3000")
+        logo.setFont(self._f("logo", 15, bold=True, italic=True))
+        logo.setStyleSheet(f"color:{C['vms_logo']}; background:transparent;")
+        bar.addWidget(logo)
+        parent.addLayout(bar)
 
     # ------------------------------------------------------------------ #
     #  Handlers                                                            #
@@ -535,13 +427,13 @@ class ChannelConfigurationDialog:
         print("OK pressed")
         if self._on_ok_callback:
             self._on_ok_callback(self._channel_num)
-        self._dialog.destroy()
+        self._dialog.accept()
 
     def _on_set_defaults(self):
         print("Set defaults pressed")
 
     def _on_cancel(self):
-        self._dialog.destroy()
+        self._dialog.reject()
 
     def _on_print(self):
         print("Print pressed")
@@ -554,9 +446,7 @@ class ChannelConfigurationDialog:
 #  Standalone preview
 # ══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    root = tk.Tk()
-    root.withdraw()
+    from qt_common import ensure_qapp
 
-    dlg = ChannelConfigurationDialog(root, 1, slot_num=10, rack_type="", active=True)
-    dlg.show()
-    root.mainloop()
+    app = ensure_qapp()
+    ChannelConfigurationDialog(None, 1, slot_num=10, rack_type="", active=True).show()

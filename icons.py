@@ -2,8 +2,7 @@
 icons.py — VMS 3000 full-color toolbar icon painter
 
 Requires:
-    Pillow
-    tkinter
+    PyQt6
 
 Font:
     MaterialIcons-Regular.ttf
@@ -48,9 +47,12 @@ And connection/status states:
 
 
 import os
-import tkinter as tk
+from typing import Optional
 
-from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtGui import (
+    QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPixmap,
+)
 
 
 # ============================================================================
@@ -241,31 +243,21 @@ _ACTIVE_COLOR = "#1E40AF"
 # FONT SEARCH
 # ============================================================================
 
-def _find_font(
-    size: int,
-) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """
-    Search common locations for MaterialIcons-Regular.ttf.
-    """
+_FONT_FAMILY: Optional[str] = None
+_FONT_TRIED = False
 
-    base_dir = os.path.dirname(
-        os.path.abspath(__file__)
-    )
 
-    candidates = [
+def _font_candidates() -> list:
+    """Common locations for MaterialIcons-Regular.ttf."""
 
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    return [
         # Same directory
-        os.path.join(
-            base_dir,
-            "MaterialIcons-Regular.ttf",
-        ),
+        os.path.join(base_dir, "MaterialIcons-Regular.ttf"),
 
         # icons sub-folder
-        os.path.join(
-            base_dir,
-            "icons",
-            "MaterialIcons-Regular.ttf",
-        ),
+        os.path.join(base_dir, "icons", "MaterialIcons-Regular.ttf"),
 
         # Current working directory
         "MaterialIcons-Regular.ttf",
@@ -276,52 +268,48 @@ def _find_font(
         # Linux
         "/usr/share/fonts/truetype/material-design-icons/"
         "MaterialIcons-Regular.ttf",
-
         "/usr/share/fonts/MaterialIcons-Regular.ttf",
 
         # macOS
         "/Library/Fonts/MaterialIcons-Regular.ttf",
-
-        os.path.expanduser(
-            "~/Library/Fonts/MaterialIcons-Regular.ttf"
-        ),
+        os.path.expanduser("~/Library/Fonts/MaterialIcons-Regular.ttf"),
     ]
 
-    for path in candidates:
+
+def _find_font_family() -> Optional[str]:
+    """
+    Register MaterialIcons-Regular.ttf with Qt (once) and return its family
+    name, or None when the font could not be found/loaded.
+
+    Must be called after the QGuiApplication exists.
+    """
+    global _FONT_FAMILY, _FONT_TRIED
+
+    if _FONT_TRIED:
+        return _FONT_FAMILY
+    _FONT_TRIED = True
+
+    for path in _font_candidates():
 
         if not os.path.exists(path):
             continue
 
-        try:
+        font_id = QFontDatabase.addApplicationFont(path)
 
-            font = ImageFont.truetype(
-                path,
-                size,
-            )
+        if font_id < 0:
+            print(f"[WARN] Could not load font '{path}'")
+            continue
 
-            print(
-                f"[OK] Material Icons font loaded: {path}"
-            )
+        families = QFontDatabase.applicationFontFamilies(font_id)
 
-            return font
+        if families:
+            _FONT_FAMILY = families[0]
+            print(f"[OK] Material Icons font loaded: {path}")
+            return _FONT_FAMILY
 
-        except Exception as exc:
-
-            print(
-                f"[WARN] Could not load font "
-                f"'{path}': {exc}"
-            )
-
-    print(
-        "[WARN] MaterialIcons-Regular.ttf not found."
-    )
-
-    print(
-        "       Put MaterialIcons-Regular.ttf "
-        "beside icons.py."
-    )
-
-    return ImageFont.load_default()
+    print("[WARN] MaterialIcons-Regular.ttf not found.")
+    print("       Put MaterialIcons-Regular.ttf beside icons.py.")
+    return None
 
 
 # ============================================================================
@@ -336,12 +324,8 @@ class IconPainter:
 
         icons = IconPainter()
 
-        image = icons.get("save")
-
-        button = tk.Button(
-            root,
-            image=image,
-        )
+        pixmap = icons.get("save")          # QPixmap
+        button.setIcon(icons.get_icon("save"))   # QIcon
     """
 
     # Rendered glyph size
@@ -353,17 +337,22 @@ class IconPainter:
     def __init__(
         self,
         bg_hex: str = _DEFAULT_BG,
+        transparent: bool = True,
     ):
+        """
+        bg_hex       background colour used when transparent=False
+        transparent  render on a transparent canvas (default) so hover /
+                     pressed button backgrounds show through the icon
+        """
         self.bg_hex = bg_hex
+        self.transparent = transparent
 
-        self._cache: dict[
-            tuple[str, str],
-            ImageTk.PhotoImage,
-        ] = {}
+        self._cache: dict[tuple[str, str], QPixmap] = {}
 
-        self._font = _find_font(
-            self.SZ
-        )
+        self._family = _find_font_family()
+
+        screen = QGuiApplication.primaryScreen()
+        self._dpr = screen.devicePixelRatio() if screen is not None else 1.0
 
     # ========================================================================
     # PUBLIC API
@@ -373,7 +362,7 @@ class IconPainter:
         self,
         name: str,
         state: str = "normal",
-    ) -> ImageTk.PhotoImage:
+    ) -> QPixmap:
         """
         Return an icon.
 
@@ -390,216 +379,115 @@ class IconPainter:
             info
         """
 
-        key = (
-            name,
-            state,
-        )
+        key = (name, state)
 
         if key not in self._cache:
-
-            self._cache[key] = self._render(
-                name,
-                state,
-            )
+            self._cache[key] = self._render(name, state)
 
         return self._cache[key]
+
+    def get_icon(self, name: str) -> QIcon:
+        """QIcon with normal / hover(active) / disabled variants."""
+        icon = QIcon()
+        icon.addPixmap(self.get(name, "normal"), QIcon.Mode.Normal)
+        icon.addPixmap(self.get(name, "hover"), QIcon.Mode.Active)
+        icon.addPixmap(self.get(name, "disabled"), QIcon.Mode.Disabled)
+        return icon
 
     # ========================================================================
     # SHORTCUTS
     # ========================================================================
 
-    def normal(
-        self,
-        name: str,
-    ) -> ImageTk.PhotoImage:
+    def normal(self, name: str) -> QPixmap:
+        return self.get(name, "normal")
 
-        return self.get(
-            name,
-            "normal",
-        )
+    def hover(self, name: str) -> QPixmap:
+        return self.get(name, "hover")
 
-    def hover(
-        self,
-        name: str,
-    ) -> ImageTk.PhotoImage:
+    def active(self, name: str) -> QPixmap:
+        return self.get(name, "active")
 
-        return self.get(
-            name,
-            "hover",
-        )
+    def disabled(self, name: str) -> QPixmap:
+        return self.get(name, "disabled")
 
-    def active(
-        self,
-        name: str,
-    ) -> ImageTk.PhotoImage:
+    def connected(self, name: str = "connection") -> QPixmap:
+        return self.get(name, "connected")
 
-        return self.get(
-            name,
-            "active",
-        )
+    def connecting(self, name: str = "connection") -> QPixmap:
+        return self.get(name, "connecting")
 
-    def disabled(
-        self,
-        name: str,
-    ) -> ImageTk.PhotoImage:
+    def warning(self, name: str = "connection") -> QPixmap:
+        return self.get(name, "warning")
 
-        return self.get(
-            name,
-            "disabled",
-        )
-
-    def connected(
-        self,
-        name: str = "connection",
-    ) -> ImageTk.PhotoImage:
-
-        return self.get(
-            name,
-            "connected",
-        )
-
-    def connecting(
-        self,
-        name: str = "connection",
-    ) -> ImageTk.PhotoImage:
-
-        return self.get(
-            name,
-            "connecting",
-        )
-
-    def warning(
-        self,
-        name: str = "connection",
-    ) -> ImageTk.PhotoImage:
-
-        return self.get(
-            name,
-            "warning",
-        )
-
-    def error(
-        self,
-        name: str = "connection",
-    ) -> ImageTk.PhotoImage:
-
-        return self.get(
-            name,
-            "error",
-        )
+    def error(self, name: str = "connection") -> QPixmap:
+        return self.get(name, "error")
 
     # ========================================================================
     # RENDER
     # ========================================================================
 
-    def _render(
-        self,
-        name: str,
-        state: str,
-    ) -> ImageTk.PhotoImage:
+    def _render(self, name: str, state: str) -> QPixmap:
 
         # --------------------------------------------------------------------
         # Find codepoint
         # --------------------------------------------------------------------
 
-        cp_key = _ICON_MAP.get(
-            name
-        )
+        cp_key = _ICON_MAP.get(name)
 
         if cp_key is None:
-
-            print(
-                f"[WARN] Unknown icon: {name}"
-            )
-
+            print(f"[WARN] Unknown icon: {name}")
             cp_key = "error"
 
-        char = _CODEPOINTS.get(
-            cp_key,
-            _CODEPOINTS["error"],
-        )
+        char = _CODEPOINTS.get(cp_key, _CODEPOINTS["error"])
 
         # --------------------------------------------------------------------
         # Canvas
         # --------------------------------------------------------------------
 
-        total = (
-            self.SZ
-            + self.PAD * 2
-        )
+        total = self.SZ + self.PAD * 2
+        dpr = self._dpr
 
-        img = Image.new(
-            "RGB",
-            (
-                total,
-                total,
-            ),
-            self.bg_hex,
-        )
-
-        draw = ImageDraw.Draw(
-            img
-        )
+        pm = QPixmap(int(round(total * dpr)), int(round(total * dpr)))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent if self.transparent
+                else QColor(self.bg_hex))
 
         # --------------------------------------------------------------------
         # Color
         # --------------------------------------------------------------------
 
-        colour = self._get_colour(
-            name,
-            state,
-        )
+        colour = self._get_colour(name, state)
 
         # --------------------------------------------------------------------
         # Draw
         # --------------------------------------------------------------------
 
-        try:
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
 
-            draw.text(
-                (
-                    total // 2,
-                    total // 2,
-                ),
+        if self._family:
+            font = QFont(self._family)
+            font.setPixelSize(self.SZ)
+            p.setFont(font)
+            p.setPen(QColor(colour))
+            p.drawText(
+                QRectF(0, 0, total, total),
+                Qt.AlignmentFlag.AlignCenter,
                 char,
-                font=self._font,
-                fill=colour,
-                anchor="mm",
             )
+        else:
+            self._draw_fallback(p, total, colour)
 
-            print(
-                f"[OK] icon "
-                f"[{name}] "
-                f"[{state}] "
-                f"-> {colour}"
-            )
+        p.end()
 
-        except Exception as exc:
-
-            print(
-                f"[WARN] Failed to render "
-                f"[{name}]: {exc}"
-            )
-
-            self._draw_fallback(
-                draw,
-                total,
-                colour,
-            )
-
-        return ImageTk.PhotoImage(
-            img
-        )
+        return pm
 
     # ========================================================================
     # COLOR SELECTION
     # ========================================================================
 
-    def _get_colour(
-        self,
-        name: str,
-        state: str,
-    ) -> str:
+    def _get_colour(self, name: str, state: str) -> str:
 
         state = state.lower().strip()
 
@@ -640,21 +528,14 @@ class IconPainter:
         # Base icon color
         # --------------------------------------------------------------------
 
-        base_colour = _ICON_COLORS.get(
-            name,
-            "#475569",
-        )
+        base_colour = _ICON_COLORS.get(name, "#475569")
 
         # --------------------------------------------------------------------
         # Hover
         # --------------------------------------------------------------------
 
         if state == "hover":
-
-            return _HOVER_LIGHTEN.get(
-                base_colour,
-                base_colour,
-            )
+            return _HOVER_LIGHTEN.get(base_colour, base_colour)
 
         # --------------------------------------------------------------------
         # Normal
@@ -663,97 +544,19 @@ class IconPainter:
         return base_colour
 
     # ========================================================================
-    # FALLBACK
+    # FALLBACK  (used only when the Material Icons font is unavailable)
     # ========================================================================
 
-    def _draw_fallback(
-        self,
-        draw: ImageDraw.ImageDraw,
-        size: int,
-        colour: str,
-    ) -> None:
+    def _draw_fallback(self, painter: QPainter, size: int, colour: str) -> None:
 
-        margin = max(
-            4,
-            size // 4,
+        margin = max(4, size // 4)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(colour))
+        painter.drawRoundedRect(
+            QRectF(margin, margin, size - 2 * margin, size - 2 * margin),
+            5, 5,
         )
-
-        try:
-
-            draw.rounded_rectangle(
-                [
-                    margin,
-                    margin,
-                    size - margin,
-                    size - margin,
-                ],
-                radius=5,
-                fill=colour,
-            )
-
-        except Exception:
-
-            draw.rectangle(
-                [
-                    margin,
-                    margin,
-                    size - margin,
-                    size - margin,
-                ],
-                fill=colour,
-            )
-
-    # ========================================================================
-    # TKINTER FALLBACK
-    # ========================================================================
-
-    def _fallback(
-        self,
-    ) -> tk.PhotoImage:
-
-        size = (
-            self.SZ
-            + self.PAD * 2
-        )
-
-        image = tk.PhotoImage(
-            width=size,
-            height=size,
-        )
-
-        image.put(
-            self.bg_hex,
-            to=(
-                0,
-                0,
-                size,
-                size,
-            ),
-        )
-
-        margin = size // 4
-
-        for y in range(
-            margin,
-            size - margin,
-        ):
-
-            for x in range(
-                margin,
-                size - margin,
-            ):
-
-                image.put(
-                    "#475569",
-                    to=(
-                        x,
-                        y,
-                        x + 1,
-                        y + 1,
-                    ),
-                )
-
-        return image
 
 
 # ============================================================================
@@ -768,10 +571,7 @@ class ToolbarIcons:
 
         icons = ToolbarIcons()
 
-        button = tk.Button(
-            toolbar,
-            image=icons.save,
-        )
+        button.setIcon(QIcon(icons.save))
     """
 
     def __init__(
@@ -779,135 +579,70 @@ class ToolbarIcons:
         bg_hex: str = _DEFAULT_BG,
     ):
 
-        self.painter = IconPainter(
-            bg_hex=bg_hex,
-        )
+        self.painter = IconPainter(bg_hex=bg_hex)
 
         # --------------------------------------------------------------------
         # FILE
         # --------------------------------------------------------------------
 
-        self.new = self.painter.get(
-            "new"
-        )
-
-        self.open = self.painter.get(
-            "open"
-        )
-
-        self.save = self.painter.get(
-            "save"
-        )
-
-        self.print = self.painter.get(
-            "print"
-        )
+        self.new = self.painter.get("new")
+        self.open = self.painter.get("open")
+        self.save = self.painter.get("save")
+        self.print = self.painter.get("print")
 
         # --------------------------------------------------------------------
         # SYSTEM
         # --------------------------------------------------------------------
 
-        self.settings = self.painter.get(
-            "settings"
-        )
-
-        self.help = self.painter.get(
-            "help"
-        )
-
-        self.refresh = self.painter.get(
-            "refresh"
-        )
+        self.settings = self.painter.get("settings")
+        self.help = self.painter.get("help")
+        self.refresh = self.painter.get("refresh")
 
         # --------------------------------------------------------------------
         # EDITING
         # --------------------------------------------------------------------
 
-        self.cut = self.painter.get(
-            "cut"
-        )
-
-        self.copy = self.painter.get(
-            "copy"
-        )
-
-        self.paste = self.painter.get(
-            "paste"
-        )
+        self.cut = self.painter.get("cut")
+        self.copy = self.painter.get("copy")
+        self.paste = self.painter.get("paste")
 
         # --------------------------------------------------------------------
         # TRANSFER
         # --------------------------------------------------------------------
 
-        self.upload = self.painter.get(
-            "upload"
-        )
-
-        self.download = self.painter.get(
-            "download"
-        )
+        self.upload = self.painter.get("upload")
+        self.download = self.painter.get("download")
 
         # --------------------------------------------------------------------
         # SECURITY
         # --------------------------------------------------------------------
 
-        self.key = self.painter.get(
-            "key"
-        )
+        self.key = self.painter.get("key")
 
         # --------------------------------------------------------------------
         # NETWORK
         # --------------------------------------------------------------------
 
-        self.connection = self.painter.get(
-            "connection"
-        )
-
-        self.network = self.painter.get(
-            "network"
-        )
-
-        self.disconnect = self.painter.get(
-            "disconnect"
-        )
+        self.connection = self.painter.get("connection")
+        self.network = self.painter.get("network")
+        self.disconnect = self.painter.get("disconnect")
 
         # --------------------------------------------------------------------
         # STATUS
         # --------------------------------------------------------------------
 
-        self.connected = self.painter.get(
-            "connection",
-            "connected",
-        )
-
-        self.connecting = self.painter.get(
-            "connection",
-            "connecting",
-        )
-
-        self.warning = self.painter.get(
-            "connection",
-            "warning",
-        )
-
-        self.error = self.painter.get(
-            "connection",
-            "error",
-        )
-
-        self.info = self.painter.get(
-            "connection",
-            "info",
-        )
+        self.connected = self.painter.get("connection", "connected")
+        self.connecting = self.painter.get("connection", "connecting")
+        self.warning = self.painter.get("connection", "warning")
+        self.error = self.painter.get("connection", "error")
+        self.info = self.painter.get("connection", "info")
 
 
 # ============================================================================
 # OPTIONAL COLOR LOOKUP
 # ============================================================================
 
-def get_icon_colour(
-    name: str,
-) -> str:
+def get_icon_colour(name: str) -> str:
     """
     Return the normal color assigned to an icon.
 
@@ -915,10 +650,7 @@ def get_icon_colour(
     text/indicator colors.
     """
 
-    return _ICON_COLORS.get(
-        name,
-        "#475569",
-    )
+    return _ICON_COLORS.get(name, "#475569")
 
 
 # ============================================================================
@@ -927,134 +659,63 @@ def get_icon_colour(
 
 if __name__ == "__main__":
 
-    root = tk.Tk()
+    import sys
 
-    root.title(
-        "VMS 3000 - Icon Preview"
+    from PyQt6.QtWidgets import (
+        QApplication, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget,
     )
 
-    root.configure(
-        bg=_DEFAULT_BG
-    )
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
 
-    icons = IconPainter()
+    win = QWidget()
+    win.setWindowTitle("VMS 3000 Icon Test")
+    win.setStyleSheet(f"background:{_DEFAULT_BG};")
 
-    toolbar = tk.Frame(
-        root,
-        bg=_DEFAULT_BG,
-        padx=12,
-        pady=12,
-    )
+    layout = QVBoxLayout(win)
 
-    toolbar.pack(
-        fill="x"
-    )
+    icons = ToolbarIcons()
 
     # ------------------------------------------------------------------------
-    # Preview icons
+    # Toolbar row
     # ------------------------------------------------------------------------
 
-    icon_names = [
-        "new",
-        "open",
-        "save",
-        "print",
-        "settings",
-        "cut",
-        "copy",
-        "paste",
-        "upload",
-        "download",
-        "refresh",
-        "key",
-        "connection",
-        "network",
-        "disconnect",
-        "help",
-    ]
+    toolbar = QHBoxLayout()
 
-    for name in icon_names:
+    for name in ("new", "open", "save", "print", "settings", "help",
+                 "cut", "copy", "paste", "upload", "download", "refresh",
+                 "key", "connection", "network", "disconnect"):
 
-        button = tk.Button(
-            toolbar,
-            image=icons.get(name),
-            bg=_DEFAULT_BG,
-            activebackground="#E2E8F0",
-            relief="flat",
-            borderwidth=0,
-            padx=5,
-            pady=5,
-            cursor="hand2",
-        )
+        button = QToolButton()
+        button.setIcon(icons.painter.get_icon(name))
+        button.setIconSize(icons.painter.get(name).size() / icons.painter._dpr)
+        button.setToolTip(name)
+        toolbar.addWidget(button)
 
-        button.pack(
-            side="left",
-            padx=3,
-        )
+    toolbar.addStretch(1)
+    layout.addLayout(toolbar)
 
     # ------------------------------------------------------------------------
-    # Status preview
+    # Status row
     # ------------------------------------------------------------------------
 
-    status_frame = tk.Frame(
-        root,
-        bg=_DEFAULT_BG,
-        padx=12,
-        pady=10,
-    )
+    status = QHBoxLayout()
 
-    status_frame.pack(
-        fill="x"
-    )
+    for label, pixmap in (
+        ("Connected", icons.connected),
+        ("Connecting", icons.connecting),
+        ("Warning", icons.warning),
+        ("Error", icons.error),
+        ("Info", icons.info),
+    ):
+        icon_label = QLabel()
+        icon_label.setPixmap(pixmap)
+        status.addWidget(icon_label)
+        status.addWidget(QLabel(label))
+        status.addSpacing(12)
 
-    statuses = [
-        ("Normal", "connection", "normal"),
-        ("Connected", "connection", "connected"),
-        ("Connecting", "connection", "connecting"),
-        ("Warning", "connection", "warning"),
-        ("Error", "connection", "error"),
-    ]
+    status.addStretch(1)
+    layout.addLayout(status)
 
-    for label, name, state in statuses:
-
-        frame = tk.Frame(
-            status_frame,
-            bg=_DEFAULT_BG,
-        )
-
-        frame.pack(
-            side="left",
-            padx=8,
-        )
-
-        image = icons.get(
-            name,
-            state,
-        )
-
-        icon_label = tk.Label(
-            frame,
-            image=image,
-            bg=_DEFAULT_BG,
-        )
-
-        icon_label.pack()
-
-        text_label = tk.Label(
-            frame,
-            text=label,
-            bg=_DEFAULT_BG,
-            fg="#475569",
-            font=(
-                "Segoe UI",
-                9,
-            ),
-        )
-
-        text_label.pack()
-
-    # ------------------------------------------------------------------------
-    # Run
-    # ------------------------------------------------------------------------
-
-    root.mainloop()
+    win.show()
+    sys.exit(app.exec())

@@ -3,179 +3,155 @@ menubar.py — VMS 3000
 Dark-navy menu bar with fixed-width items and crisp separators.
 """
 
-import tkinter as tk
+from typing import Optional
+
+from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtWidgets import QMainWindow, QMenu, QMenuBar
+
 from theme import T
 
 
-def build_menubar(root, fonts, commands: dict):
+def _menu_qss() -> str:
+    return f"""
+        QMenuBar {{
+            background:{T['menu_bg']}; color:{T['menu_fg']};
+            border:none; padding:0px;
+        }}
+        QMenuBar::item {{
+            background:transparent; color:{T['menu_fg']};
+            padding:6px 12px;
+        }}
+        QMenuBar::item:selected, QMenuBar::item:pressed {{
+            background:{T['menu_active_bg']}; color:{T['menu_active_fg']};
+        }}
+        QMenu {{
+            background:{T['menu_drop_bg']}; color:{T['menu_fg']};
+            border:1px solid {T['menu_sep']};
+        }}
+        QMenu::item {{ padding:5px 30px 5px 16px; }}
+        QMenu::item:selected {{
+            background:{T['menu_active_bg']}; color:{T['menu_active_fg']};
+        }}
+        QMenu::item:disabled {{ color:#8ea3bf; }}
+        QMenu::separator {{
+            height:1px; background:{T['menu_sep']}; margin:4px 6px;
+        }}
     """
-    Attach a dark-navy OS menu bar to *root*.
+
+
+def build_menubar(root: QMainWindow, fonts: dict, commands: dict) -> QMenuBar:
+    """
+    Attach a dark-navy menu bar to *root*.
 
     Expected command keys:
-        new, open, save, save_as, connect, disconnect,
-        calibrate, diag, comm, about
+        new, open, save, save_as, direct_connect, network_connect,
+        disconnect, connect, calibrate, diag, comm, about
     """
-    mb = tk.Menu(
-        root,
-        bg=T["menu_bg"],
-        fg=T["menu_fg"],
-        activebackground=T["menu_active_bg"],
-        activeforeground=T["menu_active_fg"],
-        font=fonts["menu"],
-        relief="flat",
-        bd=0,
-    )
-    root.config(menu=mb)
+    mb = root.menuBar()
+    mb.setNativeMenuBar(False)          # keep the themed in-window bar on macOS
+    mb.setFont(fonts["menu"])
+    mb.setStyleSheet(_menu_qss())
 
-    # ── helper ──────────────────────────────────────────────────────
-    def _drop(label, items):
-        m = tk.Menu(
-            mb,
-            tearoff=0,
-            bg=T["menu_drop_bg"],
-            fg=T["menu_fg"],
-            activebackground=T["menu_active_bg"],
-            activeforeground=T["menu_active_fg"],
-            selectcolor=T["menu_active_bg"],
-            font=fonts["menu"],
-            relief="flat",
-            bd=1,
-            postcommand=None,
-        )
+    def _add(menu: QMenu, label: str, cmd=None, accel: str = "",
+             enabled: bool = True, bind: bool = False) -> QAction:
+        """
+        Add a menu entry.  *accel* is always displayed; it is only bound as a
+        real keyboard shortcut when *bind* is True and a command is attached.
+        """
+        act = QAction(label, menu)
+        if accel:
+            if bind and cmd:
+                act.setShortcut(QKeySequence(accel))
+            else:
+                act.setText(f"{label}\t{accel}")
+        act.setEnabled(enabled)
+        if cmd:
+            act.triggered.connect(lambda _checked=False, f=cmd: f())
+        menu.addAction(act)
+        return act
+
+    def _drop(label: str, items: list) -> QMenu:
+        m = mb.addMenu(label)
+        m.setFont(fonts["menu"])
         for item in items:
             if item is None:
-                m.add_separator()
+                m.addSeparator()
             else:
                 lbl, cmd, *rest = item
-                state    = rest[0] if rest else tk.NORMAL
-                accel    = rest[1] if len(rest) > 1 else ""
-                m.add_command(
-                    label=f"  {lbl}",
-                    accelerator=accel,
-                    command=cmd or (lambda: None),
-                    state=state,
-                )
-        mb.add_cascade(label=f"  {label}  ", menu=m)
-
-    # ── helper for submenu ───────────────────────────────────────────
-    def _submenu(parent, label, items):
-        m = tk.Menu(
-            parent,
-            tearoff=0,
-            bg=T["menu_drop_bg"],
-            fg=T["menu_fg"],
-            activebackground=T["menu_active_bg"],
-            activeforeground=T["menu_active_fg"],
-            selectcolor=T["menu_active_bg"],
-            font=fonts["menu"],
-            relief="flat",
-            bd=1,
-        )
-        for item in items:
-            if item is None:
-                m.add_separator()
-            else:
-                lbl, cmd, *rest = item
-                state    = rest[0] if rest else tk.NORMAL
-                accel    = rest[1] if len(rest) > 1 else ""
-                m.add_command(
-                    label=f"  {lbl}",
-                    accelerator=accel,
-                    command=cmd or (lambda: None),
-                    state=state,
-                )
-        parent.add_cascade(label=f"  {label}  ", menu=m)
+                enabled = rest[0] if rest else True
+                accel = rest[1] if len(rest) > 1 else ""
+                _add(m, lbl, cmd, accel, enabled)
+        return m
 
     # ── File ────────────────────────────────────────────────────────
-    file_menu = tk.Menu(
-        mb,
-        tearoff=0,
-        bg=T["menu_drop_bg"],
-        fg=T["menu_fg"],
-        activebackground=T["menu_active_bg"],
-        activeforeground=T["menu_active_fg"],
-        selectcolor=T["menu_active_bg"],
-        font=fonts["menu"],
-        relief="flat",
-        bd=1,
-    )
-    
-    file_menu.add_command(label="  New",            accelerator="Ctrl+N", command=commands.get("new") or (lambda: None))
-    file_menu.add_command(label="  Open…",          accelerator="Ctrl+O", command=commands.get("open") or (lambda: None))
-    file_menu.add_command(label="  Save",           accelerator="Ctrl+S", command=commands.get("save") or (lambda: None))
-    file_menu.add_command(label="  Save As…",       accelerator="Ctrl+Shift+S", command=commands.get("save_as") or (lambda: None))
-    
+    file_menu = mb.addMenu("File")
+    file_menu.setFont(fonts["menu"])
+
+    _add(file_menu, "New",        commands.get("new"),     "Ctrl+N",       bind=True)
+    _add(file_menu, "Open…",      commands.get("open"),    "Ctrl+O",       bind=True)
+    _add(file_menu, "Save",       commands.get("save"),    "Ctrl+S",       bind=True)
+    _add(file_menu, "Save As…",   commands.get("save_as"), "Ctrl+Shift+S", bind=True)
+
     # Connection submenu
-    connection_menu = tk.Menu(
-        file_menu,
-        tearoff=0,
-        bg=T["menu_drop_bg"],
-        fg=T["menu_fg"],
-        activebackground=T["menu_active_bg"],
-        activeforeground=T["menu_active_fg"],
-        selectcolor=T["menu_active_bg"],
-        font=fonts["menu"],
-        relief="flat",
-        bd=1,
-    )
-    connection_menu.add_command(label="  Direct Connect",   command=commands.get("direct_connect") or (lambda: None))
-    connection_menu.add_command(label="  Network Connect",  command=commands.get("network_connect") or (lambda: None))
-    connection_menu.add_command(label="  Disconnect",       command=commands.get("disconnect") or (lambda: None))
-    file_menu.add_cascade(label="  Connection  ", menu=connection_menu)
-    
-    file_menu.add_separator()
-    file_menu.add_command(label="  Print…",         accelerator="Ctrl+P", command=None)
-    file_menu.add_separator()
-    file_menu.add_command(label="  Exit",           accelerator="Alt+F4", command=root.destroy)
-    
-    mb.add_cascade(label="  File  ", menu=file_menu)
+    connection_menu = file_menu.addMenu("Connection")
+    connection_menu.setFont(fonts["menu"])
+    _add(connection_menu, "Direct Connect",  commands.get("direct_connect"))
+    _add(connection_menu, "Network Connect", commands.get("network_connect"))
+    _add(connection_menu, "Disconnect",      commands.get("disconnect"))
+
+    file_menu.addSeparator()
+    _add(file_menu, "Print…", None, "Ctrl+P")
+    file_menu.addSeparator()
+    _add(file_menu, "Exit", root.close, "Alt+F4")
 
     # ── Edit ────────────────────────────────────────────────────────
     _drop("Edit", [
-        ("Undo",           None,  tk.DISABLED, "Ctrl+Z"),
-        ("Redo",           None,  tk.DISABLED, "Ctrl+Y"),
+        ("Undo",       None, False, "Ctrl+Z"),
+        ("Redo",       None, False, "Ctrl+Y"),
         None,
-        ("Cut",            None,  tk.NORMAL,  "Ctrl+X"),
-        ("Copy",           None,  tk.NORMAL,  "Ctrl+C"),
-        ("Paste",          None,  tk.NORMAL,  "Ctrl+V"),
+        ("Cut",        None, True,  "Ctrl+X"),
+        ("Copy",       None, True,  "Ctrl+C"),
+        ("Paste",      None, True,  "Ctrl+V"),
         None,
-        ("Select All",     None,  tk.NORMAL,  "Ctrl+A"),
+        ("Select All", None, True,  "Ctrl+A"),
     ])
 
     # ── Utilities ───────────────────────────────────────────────────
     _drop("Utilities", [
-        ("Connect",            commands.get("connect"),     tk.NORMAL),
-        ("Disconnect",         commands.get("disconnect"),  tk.NORMAL),
+        ("Connect",           commands.get("connect"),    True),
+        ("Disconnect",        commands.get("disconnect"), True),
         None,
-        ("Calibrate…",         commands.get("calibrate"),  tk.NORMAL),
-        ("Diagnostics…",       commands.get("diag"),       tk.NORMAL),
-        ("Firmware Update…",   None,                       tk.NORMAL),
+        ("Calibrate…",        commands.get("calibrate"),  True),
+        ("Diagnostics…",      commands.get("diag"),       True),
+        ("Firmware Update…",  None,                       True),
     ])
 
     # ── Options ─────────────────────────────────────────────────────
     _drop("Options", [
-        ("Preferences…",             None,                    tk.NORMAL),
-        ("Communication Settings…",  commands.get("comm"),    tk.NORMAL),
-        ("Rack Address…",            None,                    tk.NORMAL),
+        ("Preferences…",            None,                  True),
+        ("Communication Settings…", commands.get("comm"),  True),
+        ("Rack Address…",           None,                  True),
         None,
-        ("Theme",                    None,                    tk.DISABLED),
+        ("Theme",                   None,                  False),
     ])
 
     # ── View ────────────────────────────────────────────────────────
     _drop("View", [
-        ("Zoom In",      None, tk.NORMAL, "Ctrl++"),
-        ("Zoom Out",     None, tk.NORMAL, "Ctrl+-"),
-        ("Reset Zoom",   None, tk.NORMAL, "Ctrl+0"),
+        ("Zoom In",      None, True, "Ctrl++"),
+        ("Zoom Out",     None, True, "Ctrl+-"),
+        ("Reset Zoom",   None, True, "Ctrl+0"),
         None,
-        ("Full Screen",  None, tk.NORMAL, "F11"),
-        ("Reset Layout", None, tk.NORMAL),
+        ("Full Screen",  None, True, "F11"),
+        ("Reset Layout", None, True),
     ])
 
     # ── Help ────────────────────────────────────────────────────────
     _drop("Help", [
-        ("Help Topics",      None,                    tk.NORMAL, "F1"),
-        ("Quick Start Guide",None,                    tk.NORMAL),
+        ("Help Topics",       None,                   True, "F1"),
+        ("Quick Start Guide", None,                   True),
         None,
-        ("Check for Updates",None,                    tk.NORMAL),
-        ("About VMS 3000",   commands.get("about"),  tk.NORMAL),
+        ("Check for Updates", None,                   True),
+        ("About VMS 3000",    commands.get("about"),  True),
     ])
+
+    return mb

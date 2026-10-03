@@ -3,9 +3,13 @@ sidebar.py — VMS 3000 • Professional navy sidebar
 Modern navigation buttons with unique accent colors.
 """
 
-import tkinter as tk
-import tkinter.font as tkfont
+from typing import Callable, Optional
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+
 from theme import T
+from qt_common import hline, qfont
 
 
 _NAV_ITEMS = [
@@ -16,331 +20,193 @@ _NAV_ITEMS = [
 ]
 
 
-def build_sidebar(parent, fonts: dict, commands: dict) -> tk.Frame:
-    sb = tk.Frame(
-        parent,
-        bg=T["sidebar_bg"],
-        width=220
-    )
-    sb.pack(side="left", fill="y")
-    sb.pack_propagate(False)
+def build_sidebar(parent, fonts: dict, commands: dict) -> QFrame:
+    """Create the sidebar and add it to *parent*'s layout."""
+    sb = QFrame()
+    sb.setObjectName("sidebar")
+    sb.setFixedWidth(220)
+    sb.setStyleSheet(f"QFrame#sidebar {{ background:{T['sidebar_bg']}; }}")
+
+    lay = QVBoxLayout(sb)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(0)
 
     # ── Top accent line ────────────────────────────────────────────
-    tk.Frame(
-        sb,
-        bg=T["accent_teal"],
-        height=3
-    ).pack(fill="x")
+    lay.addWidget(hline(T["accent_teal"], 3))
 
     # ── Section header ────────────────────────────────────────────
-    hdr = tk.Frame(
-        sb,
-        bg=T["sidebar_dark"],
-        pady=14
-    )
-    hdr.pack(fill="x")
-
-    tk.Label(
-        hdr,
-        text="N A V I G A T I O N",
-        font=tkfont.Font(
-            family="Segoe UI",
-            size=8,
-            weight="bold"
-        ),
-        bg=T["sidebar_dark"],
-        fg="#6B87A3",
-    ).pack(padx=14, anchor="w")
+    hdr = QWidget()
+    hdr.setStyleSheet(f"background:{T['sidebar_dark']};")
+    hl = QVBoxLayout(hdr)
+    hl.setContentsMargins(14, 14, 14, 14)
+    t = QLabel("N A V I G A T I O N")
+    t.setFont(qfont("Segoe UI", 8, bold=True))
+    t.setStyleSheet("color:#6B87A3; background:transparent;")
+    hl.addWidget(t)
+    lay.addWidget(hdr)
 
     # ── Navigation buttons ───────────────────────────────────────
     for label, sublabel, key, accent_color in _NAV_ITEMS:
-        _nav_btn(
-            sb,
-            fonts,
-            label,
-            sublabel,
-            commands.get(key),
-            accent_color
-        )
+        lay.addSpacing(4)
+        row = QHBoxLayout()
+        row.setContentsMargins(8, 0, 8, 0)
+        row.addWidget(NavButton(fonts, label, sublabel, commands.get(key), accent_color))
+        lay.addLayout(row)
+        lay.addSpacing(4)
 
     # ── Spacer ────────────────────────────────────────────────────
-    tk.Frame(
-        sb,
-        bg=T["sidebar_bg"]
-    ).pack(fill="both", expand=True)
+    lay.addStretch(1)
 
     # ── Status section ────────────────────────────────────────────
-    _status_block(sb, fonts)
+    lay.addWidget(_status_block(fonts))
 
     # ── Bottom brand ──────────────────────────────────────────────
-    _brand_block(sb, fonts)
+    lay.addWidget(_brand_block(fonts))
 
+    pl = parent.layout() if parent is not None else None
+    if pl is not None:
+        pl.addWidget(sb)
     return sb
 
 
-def _nav_btn(
-    parent: tk.Frame,
-    fonts: dict,
-    label: str,
-    sublabel: str,
-    cmd,
-    accent_color: str
-) -> None:
+class NavButton(QFrame):
     """
     Modern two-line navigation button.
 
-    Each button has:
       • Unique accent color
       • Dark card background
-      • Hover highlight
-      • Pressed state
-      • Colored left indicator
-      • Subtle visual separation
+      • Hover highlight / pressed state
+      • Coloured left indicator and status dot
     """
 
-    normal_bg = "#172A3D"
-    hover_bg = "#20384F"
-    pressed_bg = "#102235"
+    NORMAL_BG = "#172A3D"
+    HOVER_BG = "#20384F"
+    PRESSED_BG = "#102235"
 
-    # Outer card
-    btn_frame = tk.Frame(
-        parent,
-        bg=normal_bg,
-        cursor="hand2",
-        height=62
-    )
-    btn_frame.pack(
-        fill="x",
-        padx=8,
-        pady=4
-    )
-    btn_frame.pack_propagate(False)
+    def __init__(self, fonts: dict, label: str, sublabel: str,
+                 cmd: Optional[Callable], accent_color: str):
+        super().__init__()
+        self._cmd = cmd
+        self._pressed = False
+        self._hover = False
+        self.setObjectName("navBtn")
+        self.setFixedHeight(62)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    # ── Left accent indicator ────────────────────────────────────
-    accent = tk.Frame(
-        btn_frame,
-        bg=accent_color,
-        width=4
-    )
-    accent.pack(
-        side="left",
-        fill="y"
-    )
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
 
-    # ── Content area ─────────────────────────────────────────────
-    inner = tk.Frame(
-        btn_frame,
-        bg=normal_bg,
-        padx=12,
-        pady=9
-    )
-    inner.pack(
-        side="left",
-        fill="both",
-        expand=True
-    )
+        # Left accent indicator
+        accent = QFrame()
+        accent.setFixedWidth(4)
+        accent.setStyleSheet(f"background:{accent_color};")
+        h.addWidget(accent)
 
-    # Main label
-    lbl_main = tk.Label(
-        inner,
-        text=label,
-        font=fonts["ui_b"],
-        bg=normal_bg,
-        fg="#F2F7FC",
-        anchor="w",
-        cursor="hand2",
-    )
-    lbl_main.pack(fill="x")
+        # Content area
+        inner = QVBoxLayout()
+        inner.setContentsMargins(12, 9, 12, 9)
+        inner.setSpacing(2)
+        self._main = QLabel(label)
+        self._main.setFont(fonts["ui_b"])
+        self._sub = QLabel(sublabel)
+        self._sub.setFont(qfont("Segoe UI", 8))
+        inner.addWidget(self._main)
+        inner.addWidget(self._sub)
+        h.addLayout(inner, 1)
 
-    # Sub label
-    lbl_sub = tk.Label(
-        inner,
-        text=sublabel,
-        font=tkfont.Font(
-            family="Segoe UI",
-            size=8
-        ),
-        bg=normal_bg,
-        fg="#7891A8",
-        anchor="w",
-        cursor="hand2",
-    )
-    lbl_sub.pack(
-        fill="x",
-        pady=(2, 0)
-    )
+        # Small coloured status dot
+        dot = QLabel("●")
+        dot.setFont(qfont("Segoe UI", 7))
+        dot.setStyleSheet(f"color:{accent_color}; background:transparent;")
+        h.addWidget(dot)
+        h.addSpacing(12)
 
-    # ── Small colored status dot ─────────────────────────────────
-    dot = tk.Label(
-        btn_frame,
-        text="●",
-        font=tkfont.Font(
-            family="Segoe UI",
-            size=7
-        ),
-        bg=normal_bg,
-        fg=accent_color,
-        cursor="hand2",
-    )
-    dot.pack(
-        side="right",
-        padx=(0, 12)
-    )
+        for w in (accent, self._main, self._sub, dot):
+            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
-    widgets = [
-        btn_frame,
-        inner,
-        lbl_main,
-        lbl_sub,
-        dot,
-    ]
+        self._restyle()
 
-    def _enter(event=None):
-        for widget in widgets:
-            widget.config(bg=hover_bg)
+    def _restyle(self):
+        bg = (self.PRESSED_BG if self._pressed
+              else self.HOVER_BG if self._hover else self.NORMAL_BG)
+        self.setStyleSheet(f"QFrame#navBtn {{ background:{bg}; }}")
+        hi = self._hover or self._pressed
+        self._main.setStyleSheet(
+            f"color:{'#FFFFFF' if hi else '#F2F7FC'}; background:transparent;")
+        self._sub.setStyleSheet(
+            f"color:{'#9DB4C9' if hi else '#7891A8'}; background:transparent;")
 
-        accent.config(bg=accent_color)
+    def enterEvent(self, e):
+        self._hover = True
+        self._restyle()
 
-        lbl_main.config(
-            fg="#FFFFFF"
-        )
+    def leaveEvent(self, e):
+        self._hover = False
+        self._pressed = False
+        self._restyle()
 
-        lbl_sub.config(
-            fg="#9DB4C9"
-        )
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self._restyle()
 
-    def _leave(event=None):
-        for widget in widgets:
-            widget.config(bg=normal_bg)
-
-        accent.config(bg=accent_color)
-
-        lbl_main.config(
-            fg="#F2F7FC"
-        )
-
-        lbl_sub.config(
-            fg="#7891A8"
-        )
-
-    def _press(event=None):
-        for widget in widgets:
-            widget.config(bg=pressed_bg)
-
-        accent.config(
-            bg=accent_color
-        )
-
-    def _release(event=None):
-        for widget in widgets:
-            widget.config(bg=hover_bg)
-
-        accent.config(
-            bg=accent_color
-        )
-
-        if cmd:
-            cmd()
-
-    # Bind everything except accent bar
-    for widget in widgets:
-        widget.bind("<Enter>", _enter)
-        widget.bind("<Leave>", _leave)
-        widget.bind("<ButtonPress-1>", _press)
-        widget.bind("<ButtonRelease-1>", _release)
+    def mouseReleaseEvent(self, e):
+        was_pressed = self._pressed
+        self._pressed = False
+        self._restyle()
+        if was_pressed and e.button() == Qt.MouseButton.LeftButton and self.rect().contains(e.position().toPoint()):
+            if self._cmd:
+                self._cmd()
 
 
-def _status_block(parent: tk.Frame, fonts: dict) -> None:
+def _status_block(fonts: dict) -> QWidget:
     """Modern device connection status."""
+    blk = QWidget()
+    blk.setStyleSheet(f"background:{T['sidebar_dark']};")
+    bl = QVBoxLayout(blk)
+    bl.setContentsMargins(14, 13, 14, 13)
 
-    blk = tk.Frame(
-        parent,
-        bg=T["sidebar_dark"],
-        pady=13,
-        padx=14
-    )
-    blk.pack(fill="x")
+    t = QLabel("DEVICE STATUS")
+    t.setFont(qfont("Segoe UI", 8, bold=True))
+    t.setStyleSheet("color:#6B87A3; background:transparent;")
+    bl.addWidget(t)
+    bl.addSpacing(9)
 
-    tk.Label(
-        blk,
-        text="DEVICE STATUS",
-        font=tkfont.Font(
-            family="Segoe UI",
-            size=8,
-            weight="bold"
-        ),
-        bg=T["sidebar_dark"],
-        fg="#6B87A3",
-    ).pack(anchor="w")
-
-    row = tk.Frame(
-        blk,
-        bg=T["sidebar_dark"]
-    )
-    row.pack(
-        anchor="w",
-        pady=(9, 0)
-    )
-
-    tk.Label(
-        row,
-        text="●",
-        font=tkfont.Font(size=10),
-        bg=T["sidebar_dark"],
-        fg=T["led_red"]
-    ).pack(side="left")
-
-    tk.Label(
-        row,
-        text="  Not Connected",
-        font=tkfont.Font(
-            family="Segoe UI",
-            size=9
-        ),
-        bg=T["sidebar_dark"],
-        fg=T["sidebar_text"]
-    ).pack(side="left")
+    row = QHBoxLayout()
+    row.setSpacing(0)
+    dot = QLabel("●")
+    dot.setFont(qfont("Segoe UI", 10))
+    dot.setStyleSheet(f"color:{T['led_red']}; background:transparent;")
+    txt = QLabel("  Not Connected")
+    txt.setFont(qfont("Segoe UI", 9))
+    txt.setStyleSheet(f"color:{T['sidebar_text']}; background:transparent;")
+    row.addWidget(dot)
+    row.addWidget(txt)
+    row.addStretch(1)
+    bl.addLayout(row)
+    return blk
 
 
-def _brand_block(parent: tk.Frame, fonts: dict) -> None:
+def _brand_block(fonts: dict) -> QWidget:
     """Bottom company branding."""
+    brand = QWidget()
+    brand.setStyleSheet(f"background:{T['sidebar_dark']};")
+    bl = QVBoxLayout(brand)
+    bl.setContentsMargins(0, 14, 0, 14)
+    bl.setSpacing(0)
 
-    brand = tk.Frame(
-        parent,
-        bg=T["sidebar_dark"],
-        pady=14
-    )
-    brand.pack(fill="x")
+    bl.addWidget(hline(T["accent_teal"], 1))
+    bl.addSpacing(10)
 
-    tk.Frame(
-        brand,
-        bg=T["accent_teal"],
-        height=1
-    ).pack(
-        fill="x",
-        pady=(0, 10)
-    )
-
-    tk.Label(
-        brand,
-        text="SARAYU INFOTECH",
-        font=tkfont.Font(
-            family="Segoe UI",
-            size=8,
-            weight="bold"
-        ),
-        bg=T["sidebar_dark"],
-        fg="#6B87A3",
-    ).pack()
-
-    tk.Label(
-        brand,
-        text="SOLUTIONS PVT LTD",
-        font=tkfont.Font(
-            family="Segoe UI",
-            size=8
-        ),
-        bg=T["sidebar_dark"],
-        fg="#465E76",
-    ).pack()
-
+    a = QLabel("SARAYU INFOTECH")
+    a.setFont(qfont("Segoe UI", 8, bold=True))
+    a.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    a.setStyleSheet("color:#6B87A3; background:transparent;")
+    b = QLabel("SOLUTIONS PVT LTD")
+    b.setFont(qfont("Segoe UI", 8))
+    b.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    b.setStyleSheet("color:#465E76; background:transparent;")
+    bl.addWidget(a)
+    bl.addWidget(b)
+    return brand
