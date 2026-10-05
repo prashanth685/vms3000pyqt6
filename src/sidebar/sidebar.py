@@ -47,7 +47,7 @@ def build_sidebar(parent, fonts: dict, commands: dict) -> QFrame:
 
     # ── Navigation buttons ───────────────────────────────────────
     for label, sublabel, key, accent_color in _NAV_ITEMS:
-        lay.addSpacing(4)
+        lay.addSpacing(22)
         row = QHBoxLayout()
         row.setContentsMargins(8, 0, 8, 0)
         row.addWidget(NavButton(fonts, label, sublabel, commands.get(key), accent_color))
@@ -58,10 +58,10 @@ def build_sidebar(parent, fonts: dict, commands: dict) -> QFrame:
     lay.addStretch(1)
 
     # ── Status section ────────────────────────────────────────────
-    lay.addWidget(_status_block(fonts))
+    # lay.addWidget(_status_block(fonts))
 
     # ── Bottom brand ──────────────────────────────────────────────
-    lay.addWidget(_brand_block(fonts))
+    # lay.addWidget(_brand_block(fonts))
 
     pl = parent.layout() if parent is not None else None
     if pl is not None:

@@ -912,9 +912,6 @@ class ChannelConfigurationDialog:
                     "Type",
                     [
                         "3000- 8mm Proximiter",
-                        "3000- 11mm Proximiter",
-                        "3000- 5mm Proximiter",
-                        "Extended Range",
                     ],
                     "3000- 8mm Proximiter",
                 ),
@@ -926,8 +923,7 @@ class ChannelConfigurationDialog:
                     "Type",
                     [
                         "3000- 8mm Proximiter",
-                        "3000- 11mm Proximiter",
-                        "3000- 5mm Proximiter",
+
                     ],
                     "3000- 8mm Proximiter",
                 ),
