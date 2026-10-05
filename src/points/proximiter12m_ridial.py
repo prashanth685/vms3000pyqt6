@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from qt_common import (
-    ClassicTitleBar, center_on_screen, checkbox_qss, classic_combo_qss, pick_font,
+    center_on_screen, checkbox_qss, classic_combo_qss, pick_font,
     plain_label, raised_button, sunken_label,
 )
 from points.channel_configuration import ChannelConfigurationDialog, classic_group
@@ -48,7 +48,7 @@ C = {
     "combo_white_bg":  "#ffffff",   # Slot I/O Module Type dropdown
     "combo_white_fg":  "#000000",
 
-    "combo_sel_bg":    "#1a3a5c",
+    "combo_sel_bg":    "#ffffff",
     "combo_sel_fg":    "#000000",
 
 
@@ -86,6 +86,9 @@ class ProximityMonitor3000ConfigDialog:
         # Copy-button references for enable/disable, keyed "A_to_B"
         self._copy_buttons = {}
 
+        # Channel Pair Type references for copying
+        self._pair_type_combos = {}
+
     def _f(self, key, size=9, bold=False, italic=False, family=FONT_NAME):
         return pick_font(self._fonts, key, family, size, bold, italic)
 
@@ -106,10 +109,6 @@ class ProximityMonitor3000ConfigDialog:
         root = QVBoxLayout(d)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-        root.addWidget(ClassicTitleBar(
-            "Proximity Monitor 3000 Configuration", self._on_cancel,
-            self._f("title", 10, bold=True), self._f("close", 8)))
 
         body = QVBoxLayout()
         body.setContentsMargins(14, 10, 14, 10)
@@ -217,6 +216,9 @@ class ProximityMonitor3000ConfigDialog:
         gl.addWidget(pair_type)
         gl.addSpacing(4)
 
+        # Store reference to pair type combo for this channel pair
+        self._pair_type_combos[f"{ch_a_num}_{ch_b_num}"] = pair_type
+
         body = QHBoxLayout()
         gl.addLayout(body, 1)
 
@@ -314,6 +316,17 @@ class ProximityMonitor3000ConfigDialog:
         """Open the Channel-N Configuration dialog for the given channel."""
         def on_channel_config_ok(configured_channel):
             self._configured_channels.add(configured_channel)
+
+            # Save the Channel Pair Type for this channel's pair
+            pair_key = self._get_pair_key(channel_num)
+            if pair_key in self._pair_type_combos:
+                pair_type = self._pair_type_combos[pair_key].currentText()
+                # Store pair type in the channel config
+                config = ChannelConfigurationDialog.get_channel_config(channel_num)
+                if config:
+                    config["pair_type"] = pair_type
+                    ChannelConfigurationDialog._channel_configs[channel_num] = config
+
             self._update_copy_buttons()
 
         dialog = ChannelConfigurationDialog(
@@ -324,6 +337,8 @@ class ProximityMonitor3000ConfigDialog:
             rack_type=self._rack_type,
             active=active_chk.isChecked() if active_chk is not None else True,
             on_ok=on_channel_config_ok,
+            model=self._model,
+            load_existing=True,  # Load existing configuration if available
         )
         dialog.show()
 
@@ -340,10 +355,35 @@ class ProximityMonitor3000ConfigDialog:
     def _on_copy(self, from_channel, to_channel):
         """Copy configuration from one channel to another."""
         print(f"Copying configuration from Channel {from_channel} to Channel {to_channel}")
-        # TODO: Implement actual configuration data copying.
-        # For now, just mark the destination as configured.
-        self._configured_channels.add(to_channel)
-        self._update_copy_buttons()
+
+        # Use the static copy method from ChannelConfigurationDialog
+        success = ChannelConfigurationDialog.copy_configuration(from_channel, to_channel)
+
+        if success:
+            self._configured_channels.add(to_channel)
+            self._update_copy_buttons()
+
+            # Also copy Channel Pair Type (determine which pair the channels belong to)
+            # Channel 1-2 are pair 1, Channel 3-4 are pair 2
+            from_pair_key = self._get_pair_key(from_channel)
+            to_pair_key = self._get_pair_key(to_channel)
+
+            if from_pair_key in self._pair_type_combos and to_pair_key in self._pair_type_combos:
+                from_type = self._pair_type_combos[from_pair_key].currentText()
+                self._pair_type_combos[to_pair_key].setCurrentText(from_type)
+                print(f"Also copied Channel Pair Type: {from_type}")
+
+            print(f"Successfully copied configuration from Channel {from_channel} to Channel {to_channel}")
+        else:
+            print(f"Failed to copy: Channel {from_channel} has not been configured yet")
+
+    def _get_pair_key(self, channel_num):
+        """Get the pair key for a channel (1-2 -> '1_2', 3-4 -> '3_4')."""
+        if channel_num in [1, 2]:
+            return "1_2"
+        elif channel_num in [3, 4]:
+            return "3_4"
+        return None
 
     def _on_ok(self):
         print("OK pressed")

@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from qt_common import (
-    ClassicTitleBar, center_on_screen, checkbox_qss, classic_combo_qss, pick_font,
+    center_on_screen, checkbox_qss, classic_combo_qss, pick_font,
     plain_label, raised_button, sunken_label, vline,
 )
 from points.channel_configuration import ChannelConfigurationDialog
@@ -76,13 +76,23 @@ class SixMOptionsDialog:
     """Configuration dialog for a 3000/6M Module (VMS 3000)."""
 
     def __init__(self, parent, slot_num=6, fonts=None,
-                 rack_type="VMM/6M/DISP", config_id=""):
+                 rack_type="VMM/6M/DISP", config_id="", model="6M"):
         self._parent = parent
         self._slot_num = slot_num
         self._fonts = fonts if isinstance(fonts, dict) else {}
         self._rack_type = rack_type
         self._config_id = config_id
+        self._model = model  # "6M"
         self._dialog = None
+
+        # Track which channels have been configured
+        self._configured_channels = set()
+
+        # Copy-button references for enable/disable
+        self._copy_buttons = {}
+
+        # Channel Pair Type references for copying
+        self._pair_type_combos = {}
 
     def _f(self, key, size=9, bold=False, italic=False, family=FONT_NAME):
         return pick_font(self._fonts, key, family, size, bold, italic)
@@ -104,10 +114,6 @@ class SixMOptionsDialog:
         root = QVBoxLayout(d)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-        root.addWidget(ClassicTitleBar(
-            "3000/6M Options Configuration", self._on_cancel,
-            self._f("title", 11, bold=True), self._f("close", 8)))
 
         body = QVBoxLayout()
         body.setContentsMargins(14, 10, 14, 10)
@@ -212,21 +218,31 @@ class SixMOptionsDialog:
         gl.addWidget(pair_type)
         gl.addSpacing(6)
 
+        # Store reference to pair type combo for this channel pair
+        self._pair_type_combos[f"{ch_a_num}_{ch_b_num}"] = pair_type
+
         body = QHBoxLayout()
         gl.addLayout(body, 1)
         body.addWidget(self._build_channel_box(ch_a_name, ch_a_num), 1)
 
         mid = QVBoxLayout()
         mid.addSpacing(28)
-        mid.addWidget(self._btn("\u21d2", None, width=3, enabled=False))
+        copy_a_to_b = self._btn("\u21d2", lambda: self._on_copy(ch_a_num, ch_b_num),
+                                width=3, enabled=False)
+        mid.addWidget(copy_a_to_b)
         mid.addSpacing(4)
         mid.addWidget(self._btn("Copy", None, width=8))
         mid.addSpacing(4)
-        mid.addWidget(self._btn("\u21d0", None, width=3, enabled=False))
+        copy_b_to_a = self._btn("\u21d0", lambda: self._on_copy(ch_b_num, ch_a_num),
+                                width=3, enabled=False)
+        mid.addWidget(copy_b_to_a)
         mid.addStretch(1)
         body.addSpacing(8)
         body.addLayout(mid)
         body.addSpacing(8)
+
+        self._copy_buttons[f"{ch_a_num}_to_{ch_b_num}"] = copy_a_to_b
+        self._copy_buttons[f"{ch_b_num}_to_{ch_a_num}"] = copy_b_to_a
 
         body.addWidget(self._build_channel_box(ch_b_name, ch_b_num), 1)
 
@@ -313,6 +329,21 @@ class SixMOptionsDialog:
 
     def _on_options(self, channel_num, active_chk=None):
         """Open the Channel-N Configuration dialog for the given channel."""
+        def on_channel_config_ok(configured_channel):
+            self._configured_channels.add(configured_channel)
+
+            # Save the Channel Pair Type for this channel's pair
+            pair_key = self._get_pair_key(channel_num)
+            if pair_key in self._pair_type_combos:
+                pair_type = self._pair_type_combos[pair_key].currentText()
+                # Store pair type in the channel config
+                config = ChannelConfigurationDialog.get_channel_config(channel_num)
+                if config:
+                    config["pair_type"] = pair_type
+                    ChannelConfigurationDialog._channel_configs[channel_num] = config
+
+            self._update_copy_buttons()
+
         dialog = ChannelConfigurationDialog(
             self._dialog,
             channel_num,
@@ -320,8 +351,54 @@ class SixMOptionsDialog:
             fonts=self._fonts,
             rack_type=self._rack_type,
             active=active_chk.isChecked() if active_chk is not None else True,
+            on_ok=on_channel_config_ok,
+            model=self._model,
+            load_existing=True,
         )
         dialog.show()
+
+    def _update_copy_buttons(self):
+        """Enable copy buttons whose source channel has been configured."""
+        for button_key, button in self._copy_buttons.items():
+            if button is None:
+                continue
+            source_channel = int(button_key.split("_")[0])
+            if source_channel in self._configured_channels:
+                button.setEnabled(True)
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _on_copy(self, from_channel, to_channel):
+        """Copy configuration from one channel to another."""
+        print(f"Copying configuration from Channel {from_channel} to Channel {to_channel}")
+
+        # Use the static copy method from ChannelConfigurationDialog
+        success = ChannelConfigurationDialog.copy_configuration(from_channel, to_channel)
+
+        if success:
+            self._configured_channels.add(to_channel)
+            self._update_copy_buttons()
+
+            # Also copy Channel Pair Type (determine which pair the channels belong to)
+            # Channel 1-2 are pair 1, Channel 3-4 are pair 2
+            from_pair_key = self._get_pair_key(from_channel)
+            to_pair_key = self._get_pair_key(to_channel)
+
+            if from_pair_key in self._pair_type_combos and to_pair_key in self._pair_type_combos:
+                from_type = self._pair_type_combos[from_pair_key].currentText()
+                self._pair_type_combos[to_pair_key].setCurrentText(from_type)
+                print(f"Also copied Channel Pair Type: {from_type}")
+
+            print(f"Successfully copied configuration from Channel {from_channel} to Channel {to_channel}")
+        else:
+            print(f"Failed to copy: Channel {from_channel} has not been configured yet")
+
+    def _get_pair_key(self, channel_num):
+        """Get the pair key for a channel (1-2 -> '1_2', 3-4 -> '3_4')."""
+        if channel_num in [1, 2]:
+            return "1_2"
+        elif channel_num in [3, 4]:
+            return "3_4"
+        return None
 
     def _on_ok(self):
         print("OK pressed")

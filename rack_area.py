@@ -222,18 +222,18 @@ class RackArea(QWidget):
         """Save current rack configuration to local system."""
         if not name:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_name = f"rack_config_{timestamp}.json"
+            default_name = f"rack_config_{timestamp}.rcs"
         else:
-            default_name = f"{name}.json"
+            default_name = f"{name}.rcs"
 
         file_path, _ = QFileDialog.getSaveFileName(
             self._canvas, "Save Configuration", default_name,
-            "JSON files (*.json);;All files (*)",
+            "Rack Configuration Files (*.rcs);;All files (*)",
         )
         if not file_path:
             return None
         if "." not in os.path.basename(file_path):
-            file_path += ".json"
+            file_path += ".rcs"
 
         try:
             config = {
@@ -253,7 +253,7 @@ class RackArea(QWidget):
         """Load rack configuration from local system."""
         file_path, _ = QFileDialog.getOpenFileName(
             self._canvas, "Load Configuration", "",
-            "JSON files (*.json);;All files (*)",
+            "Rack Configuration Files (*.rcs);;All files (*)",
         )
         if not file_path:
             return None
