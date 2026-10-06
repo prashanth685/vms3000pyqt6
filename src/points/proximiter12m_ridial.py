@@ -222,6 +222,15 @@ class ProximityMonitor3000ConfigDialog:
         body = QHBoxLayout()
         gl.addLayout(body, 1)
 
+        # Left arrow before Channel A (for pairs 3-4) - copies from pair 3-4 to pair 1-2
+        if ch_a_num >= 3:
+            left_arrow = self._btn("\u21d0", lambda: self._on_copy_pair_to_pair(3, 1),
+                                   width=3, enabled=False)
+            body.addWidget(left_arrow)
+            # Store with suffix to track separately
+            self._copy_buttons[f"{ch_b_num}_to_{ch_a_num}_left"] = left_arrow
+            body.addSpacing(8)
+
         body.addWidget(self._build_channel_box(ch_a_name, ch_a_num), 1)
 
         mid = QVBoxLayout()
@@ -240,16 +249,24 @@ class ProximityMonitor3000ConfigDialog:
         body.addLayout(mid)
         body.addSpacing(8)
 
-        self._copy_buttons[f"{ch_a_num}_to_{ch_b_num}"] = copy_a_to_b
-        self._copy_buttons[f"{ch_b_num}_to_{ch_a_num}"] = copy_b_to_a
+        # Store copy buttons (only if not already stored)
+        if f"{ch_a_num}_to_{ch_b_num}" not in self._copy_buttons:
+            self._copy_buttons[f"{ch_a_num}_to_{ch_b_num}"] = copy_a_to_b
+        if f"{ch_b_num}_to_{ch_a_num}" not in self._copy_buttons:
+            self._copy_buttons[f"{ch_b_num}_to_{ch_a_num}"] = copy_b_to_a
 
         body.addWidget(self._build_channel_box(ch_b_name, ch_b_num), 1)
 
-        arrows = QVBoxLayout()
-        arrows.setContentsMargins(0, 2, 0, 0)
-        arrows.addWidget(self._btn("\u21d2", None, width=3), 0, Qt.AlignmentFlag.AlignHCenter)
-        arrows.addWidget(self._btn("\u21d0", None, width=3, enabled=False), 0, Qt.AlignmentFlag.AlignHCenter)
-        gl.addLayout(arrows)
+        # Right arrow after Channel B (only for pair 1-2) - copies to pair 3-4
+        if ch_a_num < 3:
+            right_arrow = self._btn("\u21d2", lambda: self._on_copy_pair_to_pair(1, 3),
+                                    width=3, enabled=False)
+            body.addSpacing(8)
+            body.addWidget(right_arrow)
+            # Store right arrow reference for updating
+            if f"{ch_a_num}_to_{ch_b_num}_right" not in self._copy_buttons:
+                self._copy_buttons[f"{ch_a_num}_to_{ch_b_num}_right"] = right_arrow
+
         return group
 
     def _build_channel_box(self, name, channel_num):
@@ -347,10 +364,49 @@ class ProximityMonitor3000ConfigDialog:
         for button_key, button in self._copy_buttons.items():
             if button is None:
                 continue
+            # Extract the base key (remove _right or _left suffix)
+            base_key = button_key.replace("_right", "").replace("_left", "")
+            # Skip duplicate entries (we'll process the base key and update all variants)
+            if button_key != base_key:
+                continue
             source_channel = int(button_key.split("_")[0])
             if source_channel in self._configured_channels:
+                # Enable the main button (middle button)
                 button.setEnabled(True)
                 button.setCursor(Qt.CursorShape.PointingHandCursor)
+                # Also enable the corresponding right arrow button
+                right_key = f"{button_key}_right"
+                if right_key in self._copy_buttons:
+                    self._copy_buttons[right_key].setEnabled(True)
+                    self._copy_buttons[right_key].setCursor(Qt.CursorShape.PointingHandCursor)
+                # Also enable the corresponding left arrow button (if exists)
+                left_key = f"{button_key}_left"
+                if left_key in self._copy_buttons:
+                    self._copy_buttons[left_key].setEnabled(True)
+                    self._copy_buttons[left_key].setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # Enable cross-pair arrows when the entire source pair is configured
+        # Enable right arrow for pair 1->3 (after Channel 2) when both channels 1 and 2 are configured
+        if 1 in self._configured_channels and 2 in self._configured_channels:
+            if "1_to_2_right" in self._copy_buttons:
+                self._copy_buttons["1_to_2_right"].setEnabled(True)
+                self._copy_buttons["1_to_2_right"].setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            # Disable if not fully configured
+            if "1_to_2_right" in self._copy_buttons:
+                self._copy_buttons["1_to_2_right"].setEnabled(False)
+                self._copy_buttons["1_to_2_right"].setCursor(Qt.CursorShape.ArrowCursor)
+
+        # Enable left arrow for pair 3->1 (before Channel 3) when both channels 3 and 4 are configured
+        if 3 in self._configured_channels and 4 in self._configured_channels:
+            if "4_to_3_left" in self._copy_buttons:
+                self._copy_buttons["4_to_3_left"].setEnabled(True)
+                self._copy_buttons["4_to_3_left"].setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            # Disable if not fully configured
+            if "4_to_3_left" in self._copy_buttons:
+                self._copy_buttons["4_to_3_left"].setEnabled(False)
+                self._copy_buttons["4_to_3_left"].setCursor(Qt.CursorShape.ArrowCursor)
 
     def _on_copy(self, from_channel, to_channel):
         """Copy configuration from one channel to another."""
@@ -376,6 +432,47 @@ class ProximityMonitor3000ConfigDialog:
             print(f"Successfully copied configuration from Channel {from_channel} to Channel {to_channel}")
         else:
             print(f"Failed to copy: Channel {from_channel} has not been configured yet")
+
+    def _on_copy_pair_to_pair(self, from_pair, to_pair):
+        """Copy configuration from one entire pair to another."""
+        print(f"Copying configuration from Pair {from_pair} to Pair {to_pair}")
+
+        # Determine source and destination channels
+        if from_pair == 1:
+            source_channels = [1, 2]
+        else:
+            source_channels = [3, 4]
+
+        if to_pair == 1:
+            dest_channels = [1, 2]
+        else:
+            dest_channels = [3, 4]
+
+        # Check if source channels are configured
+        all_configured = all(ch in self._configured_channels for ch in source_channels)
+
+        if not all_configured:
+            print(f"Failed to copy: Not all channels in Pair {from_pair} have been configured")
+            return
+
+        # Copy each channel's configuration
+        for src_ch, dst_ch in zip(source_channels, dest_channels):
+            success = ChannelConfigurationDialog.copy_configuration(src_ch, dst_ch)
+            if success:
+                self._configured_channels.add(dst_ch)
+                print(f"Copied Channel {src_ch} -> Channel {dst_ch}")
+
+        # Copy Channel Pair Type
+        from_pair_key = f"{source_channels[0]}_{source_channels[1]}"
+        to_pair_key = f"{dest_channels[0]}_{dest_channels[1]}"
+
+        if from_pair_key in self._pair_type_combos and to_pair_key in self._pair_type_combos:
+            from_type = self._pair_type_combos[from_pair_key].currentText()
+            self._pair_type_combos[to_pair_key].setCurrentText(from_type)
+            print(f"Copied Channel Pair Type: {from_type}")
+
+        self._update_copy_buttons()
+        print(f"Successfully copied entire Pair {from_pair} to Pair {to_pair}")
 
     def _get_pair_key(self, channel_num):
         """Get the pair key for a channel (1-2 -> '1_2', 3-4 -> '3_4')."""

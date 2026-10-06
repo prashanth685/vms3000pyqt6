@@ -587,7 +587,7 @@ class RackArea(QWidget):
         if _is_relay_module(module):
             self._draw_image_card(
                 cv, p, L, slot_idx, "Relay_Module.jpg", "#1a4fa0",
-                [(0, "3000/RLY", "#ffffff", qfont("Segoe UI", 8, True))], is_sel, True)
+                [(0, "Standard Relay module", "#ffffff", qfont("Segoe UI", 8, True))], is_sel, True)
             return
 
         if _is_6m_module(module):

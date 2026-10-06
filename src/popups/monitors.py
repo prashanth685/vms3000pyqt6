@@ -15,7 +15,7 @@ class CascadingMenu:
       Level 2 (Monitors): Proximeter Monitor, Tachometer Monitor
       Level 3 (Proximeter): 3000/12M/DIS, 3000/6M
       Level 3 (Tachometer): 3000/12M/TAC, 3000/6M/TAC
-      Level 2 (Relay): 3000/RLY
+      Level 2 (Relay): Standard Relay module, 16 channel Relay module (disabled)
     """
 
     _QSS = """
@@ -102,7 +102,9 @@ class CascadingMenu:
         """Add Relay submenu with model options."""
         relay = self._new_menu(parent_menu)
         relay.setTitle("Relay")
-        relay.addAction("3000/RLY").triggered.connect(self._pick("3000/RLY"))
+        relay.addAction("Standard Relay module").triggered.connect(self._pick("3000/RLY"))
+        disabled_action = relay.addAction("16 channel Relay module")
+        disabled_action.setEnabled(False)
         parent_menu.addMenu(relay)
 
 
