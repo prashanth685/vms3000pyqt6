@@ -2,13 +2,13 @@
 setpoins.py — VMS 3000  •  Setpoints Configuration Dialog
 "Setpoints - Radial Vibration (Slot N)"
 
-Professional "card" UI with vertical thermometer-style gauges:
-  - White track background with a white padding strip on the left & right
-    inside the tube (classic meter-face look)
+Compact "card" UI with vertical meter-style gauges:
+  - All gauges have an IDENTICAL fixed size and sit on the same baseline
+  - White track with a white padding strip on the left & right inside the tube
   - Tick marks on BOTH inner edges, sitting inside the white strip
   - Thin black pointer line spanning the full tube width
   - Red triangular secondary pointer on the right side
-  - Colour zones fill only the middle of the tube
+  - Colour zone fills only the middle of the tube
 
     from points.setpoins import SetpointsDialog
 """
@@ -18,14 +18,17 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget, QSizePolicy,
+    QPushButton, QVBoxLayout, QWidget,
 )
 
 from qt_common import center_on_parent, checkbox_qss, hline, show_warning
+
+# Import to access channel configurations
+from points.channel_configuration import ChannelConfigurationDialog
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -77,6 +80,19 @@ T = {
 
 FONT_NAME = "Segoe UI"
 
+# ---- Shared layout metrics: every column uses these so gauges line up ----
+# GAUGE_H - 2*PAD_V should be a multiple of TICK_SPACING (176 - 16 = 160)
+GAUGE_W      = 100     # widget width of every gauge
+GAUGE_H      = 176     # widget height of every gauge
+LABEL_H      = 32      # fixed height of the 2-line title above each entry
+ENTRY_H      = 22      # fixed height of every value box (and its placeholder)
+COMBO_H      = 24      # fixed height of the mode combos / matching spacer
+COL_SPACING  = 4       # vertical spacing between widgets in a column
+
+# ---- Dialog size ----
+DIALOG_MIN_W, DIALOG_MIN_H = 680, 470
+DIALOG_W, DIALOG_H         = 700, 480
+
 
 def _font(size=9, bold=False, italic=False) -> QFont:
     f = QFont(FONT_NAME)
@@ -113,14 +129,14 @@ def make_card(title, header_font):
     header = QLabel(spaced_title)
     header.setFont(header_font)
     header.setStyleSheet(
-        f"background:{T['card_header']}; color:{T['card_header_fg']}; padding:6px 12px;"
+        f"background:{T['card_header']}; color:{T['card_header_fg']}; padding:5px 10px;"
     )
     cl.addWidget(header)
 
     body = QWidget()
     body.setStyleSheet(f"background:{T['card_bg']};")
     bl = QVBoxLayout(body)
-    bl.setContentsMargins(10, 10, 10, 10)
+    bl.setContentsMargins(8, 8, 8, 8)
     cl.addWidget(body, 1)
     return outer, bl
 
@@ -136,7 +152,7 @@ def make_pill_button(text, command, font, kind="outline", enabled=True):
     b.setFont(font)
     b.setAutoDefault(False)
     b.setStyleSheet(f"""
-        QPushButton {{ background:{bg}; color:{fg}; border:1px solid {border}; padding:6px 12px; }}
+        QPushButton {{ background:{bg}; color:{fg}; border:1px solid {border}; padding:4px 8px; }}
         QPushButton:hover {{ background:{hov}; }}
         QPushButton:disabled {{ background:#eef1f6; color:#9aa0aa; border:1px solid #c7cfda; }}
     """)
@@ -148,31 +164,31 @@ def make_pill_button(text, command, font, kind="outline", enabled=True):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  VerticalGauge — vertical meter with white padding strip
+#  VerticalGauge — fixed-size vertical meter with white padding strip
 # ══════════════════════════════════════════════════════════════════════════
 
 class VerticalGauge(QWidget):
     """
-    Vertical meter gauge.
-
-    Inside the tube there is a WHITE PADDING STRIP on the left and right
-    (controlled by WHITE_PAD). The coloured zone fills only the middle.
-    Black tick marks sit inside the white strip (never on top of colour).
+    Vertical meter gauge — FIXED size so every gauge is identical.
 
       ┌──────────────────────────┐   ← black outer border
-      │ ││  (white strip)    ││  │   ← ticks live here
-      │ ││ ┌──────────────┐  ││  │
-      │ ││ │   colour     │  ││  │   ← colour fills the middle
-      │ ││ └──────────────┘  ││  │
+      │ ──  (white strip)    ──  │   ← ticks live here
+      │ ── ┌──────────────┐  ── │
+      │ ── │   colour     │  ── │   ← colour fills the middle
+      │ ── └──────────────┘  ── │
       └──────────────────────────┘
 
-    Repaints on resize so it always looks like a real meter.
+    The tube is centred horizontally inside the widget (equal left/right
+    margins). Left margin holds the top/bottom numbers, right margin holds
+    the red triangle pointer.
     """
 
-    TICK_SPACING = 10     # 10-pixel tick spacing
-    WHITE_PAD    = 16     # width of the white padding strip inside the tube (px)
+    TICK_SPACING = 10     # px between ticks
+    WHITE_PAD    = 14     # width of the white padding strip inside the tube (px)
+    TUBE_W       = 48     # width of the meter body (px)
+    PAD_V        = 8      # vertical padding top/bottom (room for number labels)
 
-    def __init__(self, fonts, colors, width=120, height=300, parent=None):
+    def __init__(self, fonts, colors, width=GAUGE_W, height=GAUGE_H, parent=None):
         super().__init__(parent)
         self._fonts = fonts
         self._colors = colors
@@ -184,12 +200,10 @@ class VerticalGauge(QWidget):
         self._pointer_frac = None
         self._pointer2_frac = None
 
-        self.setMinimumSize(width, 120)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setFixedSize(width, height)
 
     def sizeHint(self):
-        from PyQt6.QtCore import QSize
-        return QSize(120, 300)
+        return QSize(self.width(), self.height())
 
     # ------------------------------------------------------------------
     def set_colors(self, colors):
@@ -211,60 +225,51 @@ class VerticalGauge(QWidget):
         h = self.height()
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(T["card_bg"]))
-        if w < 20 or h < 20:
-            return
 
-        # ---- Layout ----
-        left_margin = 26       # room for top/bottom numeric labels
-        right_margin = 20      # room for red triangle pointer
-        pad_top = 4
-        pad_bot = 4
-
-        avail_w = w - left_margin - right_margin
-        tube_w = max(32, min(50, avail_w))       # meter body width
-        tube_h = h - pad_top - pad_bot
-        tube_x = left_margin + (avail_w - tube_w) // 2
-        tube_y = pad_top
-
-        x, y = tube_x, tube_y
-        hh = tube_h
+        # ---- Geometry (all integers so lines stay crisp) ----
+        tube_w = self.TUBE_W
+        x = (w - tube_w) // 2                       # equal margins left & right
+        y = self.PAD_V
+        # tube height snapped to a multiple of the tick spacing so the first
+        # and last ticks land exactly on the top / bottom border
+        avail_h = h - 2 * self.PAD_V
+        hh = (avail_h // self.TICK_SPACING) * self.TICK_SPACING
 
         black = QColor(T["gauge_border"])
+        wp = self.WHITE_PAD
 
-        # 1. White base + black outer border (the frame)
+        # 1. White base + black outer border
         p.setPen(QPen(black, 1))
         p.setBrush(QColor(T["gauge_bg"]))
         p.drawRect(QRectF(x + 0.5, y + 0.5, tube_w, hh))
 
-        # 2. Colour zones — inset by WHITE_PAD px on left & right
-        wp = self.WHITE_PAD
+        # 2. Colour zones — inset by WHITE_PAD on left & right
         p.setPen(Qt.PenStyle.NoPen)
         for f0, f1, color in self._zones:
-            y0 = y + f0 * hh
-            y1 = y + f1 * hh
+            y0 = y + 1 + f0 * (hh - 1)
+            y1 = y + 1 + f1 * (hh - 1)
             p.setBrush(QColor(color))
-            p.drawRect(QRectF(x + 1 + wp, y0, (tube_w - 2 - 2 * wp), y1 - y0))
+            p.drawRect(QRectF(x + 1 + wp, y0, tube_w - 1 - 2 * wp, y1 - y0))
 
-        # 3. Black outer border redrawn on top (keeps edges crisp)
+        # 3. Border redrawn on top (crisp edges)
         p.setPen(QPen(black, 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRect(QRectF(x + 0.5, y + 0.5, tube_w, hh))
 
-        # 4. Tick marks — 10px spacing, inside the white strip
-        tick_len = max(2, min(wp - 1, 6))
+        # 4. Tick marks — both sides, inside the white strip
+        tick_len = max(2, min(wp - 2, 8))
         p.setPen(QPen(QColor(self._colors["gauge_tick"]), 1))
-        ty = y
-        while ty <= y + hh + 0.5:
+        n_ticks = hh // self.TICK_SPACING
+        for i in range(n_ticks + 1):
+            ty = y + i * self.TICK_SPACING + 0.5
             p.drawLine(QPointF(x + 1, ty), QPointF(x + 1 + tick_len, ty))
-            p.drawLine(QPointF(x + tube_w - 1 - tick_len, ty), QPointF(x + tube_w - 1, ty))
-            ty += self.TICK_SPACING
+            p.drawLine(QPointF(x + tube_w - tick_len, ty), QPointF(x + tube_w, ty))
 
         # 5. Top / bottom numeric labels (left of the tube, right-aligned)
         small = self._fonts["small"]
         p.setFont(small)
         p.setPen(QColor(T["text"]))
-        fm = QFontMetrics(small)
-        lh = fm.height()
+        lh = QFontMetrics(small).height()
         p.drawText(QRectF(0, y - lh / 2, x - 4, lh),
                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                    self._top_text)
@@ -274,20 +279,20 @@ class VerticalGauge(QWidget):
 
         # 6. Primary pointer — thin line spanning the full tube
         if self._pointer_frac is not None:
-            py = y + self._pointer_frac * hh
+            py = y + round(self._pointer_frac * hh) + 0.5
             p.setPen(QPen(QColor(self._colors["pointer"]), 1))
-            p.drawLine(QPointF(x - 3, py), QPointF(x + tube_w + 3, py))
+            p.drawLine(QPointF(x - 3, py), QPointF(x + tube_w + 4, py))
 
         # 7. Secondary pointer — small red triangle on the right
         if self._pointer2_frac is not None:
-            py2 = y + self._pointer2_frac * hh
-            tri_x = x + tube_w + 3
+            py2 = y + round(self._pointer2_frac * hh) + 0.5
+            tri_x = x + tube_w + 4
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(self._colors["pointer2"]))
             p.drawPolygon(QPolygonF([
                 QPointF(tri_x, py2),
-                QPointF(tri_x + 7, py2 - 4),
-                QPointF(tri_x + 7, py2 + 4),
+                QPointF(tri_x + 8, py2 - 5),
+                QPointF(tri_x + 8, py2 + 5),
             ]))
         p.end()
 
@@ -309,10 +314,11 @@ _DEFAULT_COLORS = {
 class SetpointsDialog:
     """Setpoints - Radial Vibration configuration dialog for a DIS_MODULE channel."""
 
-    def __init__(self, parent, fonts, slot_num):
+    def __init__(self, parent, fonts, slot_num, channel_num=1):
         self._parent = parent
         self._fonts = fonts
         self._slot_num = slot_num
+        self._channel_num = channel_num
         self._dialog = None
         self._validating = False        # re-entrancy guard (message box steals focus)
 
@@ -330,21 +336,123 @@ class SetpointsDialog:
         self.direct2_value = 6
         self.direct2_top, self.direct2_bottom = 10, 0
 
+        # Scale unit label (mil or µm)
+        self._scale_unit = "mil"
+
+        # colour thresholds (overridden by channel configuration)
+        self._green_threshold = 5
+        self._yellow_threshold = 8
+
         # ---- gauge widget references ----
         self._gauge_direct1 = None
         self._gauge_direct2 = None
         self._gauge_gap = None
 
+        # ---- label references for dynamic updating ----
+        self._label_direct1 = None
+        self._label_direct2 = None
+
         # ---- configurable colors ----
         self.colors = dict(_DEFAULT_COLORS)
+
+        # ---- Load configured values from channel configuration ----
+        self._load_channel_configuration()
+
+    def _load_channel_configuration(self):
+        """Load configured direct scale and clamp values from channel configuration."""
+        config = ChannelConfigurationDialog.get_channel_config(self._channel_num)
+        if config:
+            direct_scale = config.get("direct_scale", "0-10 mil pp")
+            direct_clamp = config.get("direct_clamp", 0)
+
+            # Parse the scale to determine the range (keep original units)
+            if "0-10" in direct_scale and "mil" in direct_scale:
+                self.direct1_top = 10
+                self.direct1_bottom = 0
+                self._scale_unit = "mil"
+            elif "0-15" in direct_scale:
+                self.direct1_top = 15
+                self.direct1_bottom = 0
+                self._scale_unit = "mil"
+            elif "0-20" in direct_scale:
+                self.direct1_top = 20
+                self.direct1_bottom = 0
+                self._scale_unit = "mil"
+            elif "0-100" in direct_scale and "mil" in direct_scale:
+                self.direct1_top = 100
+                self.direct1_bottom = 0
+                self._scale_unit = "mil"
+            elif "0-100" in direct_scale and "µm" in direct_scale:
+                self.direct1_top = 100
+                self.direct1_bottom = 0
+                self._scale_unit = "µm"
+            elif "150" in direct_scale and "µm" in direct_scale:
+                self.direct1_top = 150
+                self.direct1_bottom = 0
+                self._scale_unit = "µm"
+            elif "200" in direct_scale and "µm" in direct_scale:
+                self.direct1_top = 200
+                self.direct1_bottom = 0
+                self._scale_unit = "µm"
+            elif "400" in direct_scale and "µm" in direct_scale:
+                self.direct1_top = 400
+                self.direct1_bottom = 0
+                self._scale_unit = "µm"
+            elif "500" in direct_scale and "µm" in direct_scale:
+                self.direct1_top = 500
+                self.direct1_bottom = 0
+                self._scale_unit = "µm"
+
+            # Danger gauge always shares the same scale as Alert gauge
+            self.direct2_top = self.direct1_top
+            self.direct2_bottom = 0
+
+            # Apply clamp value if it's set
+            if direct_clamp > 0:
+                self.direct1_value = min(direct_clamp, self.direct1_top)
+                self.direct2_value = min(direct_clamp * 2, self.direct1_top)
+
+            self._update_gauge_colors_from_config(direct_scale)
+
+    def _update_gauge_colors_from_config(self, direct_scale):
+        """Update gauge color thresholds based on the configured direct scale."""
+        self._green_threshold = 5
+        self._yellow_threshold = 8
+
+        if "0-15" in direct_scale:
+            self._green_threshold = 7.5
+            self._yellow_threshold = 12
+        elif "0-20" in direct_scale:
+            self._green_threshold = 10
+            self._yellow_threshold = 16
+        elif "0-100" in direct_scale:
+            self._green_threshold = 50
+            self._yellow_threshold = 80
+        elif "150" in direct_scale and "µm" in direct_scale:
+            self._green_threshold = 75
+            self._yellow_threshold = 120
+        elif "200" in direct_scale and "µm" in direct_scale:
+            self._green_threshold = 100
+            self._yellow_threshold = 160
+        elif "400" in direct_scale and "µm" in direct_scale:
+            self._green_threshold = 200
+            self._yellow_threshold = 320
+        elif "500" in direct_scale and "µm" in direct_scale:
+            self._green_threshold = 250
+            self._yellow_threshold = 400
+
+    # ──────────────────────────────────────────────────────────────────
+    def _direct_label_text(self):
+        unit = "mil pp" if self._scale_unit == "mil" else "µm pp"
+        return f"Direct\n{unit}"
 
     # ──────────────────────────────────────────────────────────────────
     def show(self):
         d = QDialog(self._parent)
         self._dialog = d
         d.setWindowTitle(f"Setpoints -Radial Vibration (Slot {self._slot_num})")
-        d.setMinimumSize(820, 560)
-        d.resize(880, 620)
+        d.setMinimumSize(DIALOG_MIN_W, DIALOG_MIN_H)
+        d.resize(DIALOG_W, DIALOG_H)
         d.setObjectName("spDialog")
         d.setStyleSheet(f"QDialog#spDialog {{ background:{T['win_bg']}; }}")
         d.setModal(True)
@@ -363,6 +471,15 @@ class SetpointsDialog:
         }
 
         self._build_ui()
+        # Update labels with correct units after building UI
+        unit_text = "mil pp" if self._scale_unit == "mil" else "µm pp"
+        if self._label_direct1:
+            self._label_direct1.setText(f"Direct\n{unit_text}")
+        if self._label_direct2:
+            self._label_direct2.setText(f"Direct {unit_text}")
+        # Update entry boxes with loaded values
+        self._entry_direct1.setText(str(self.direct1_value))
+        self._entry_direct2.setText(str(self.direct2_value))
         center_on_parent(d, self._parent)
         d.exec()
 
@@ -381,60 +498,81 @@ class SetpointsDialog:
         c.setStyleSheet(checkbox_qss(T['text']))
         return c
 
+    def _placeholder(self, height):
+        """Invisible widget used to keep every column the same height."""
+        w = QWidget()
+        w.setFixedHeight(height)
+        w.setStyleSheet("background:transparent;")
+        return w
+
+    def _build_column(self, title_widget, entry, gauge, secondary, enabled_chk):
+        """
+        One gauge column. EVERY column has the same 5 slots, in the same order,
+        with the same fixed heights, so gauges line up perfectly:
+
+            title (LABEL_H) / entry (ENTRY_H) / gauge (GAUGE_H)
+            / secondary slot (ENTRY_H) / enabled checkbox
+        """
+        col = QVBoxLayout()
+        col.setSpacing(COL_SPACING)
+        center = Qt.AlignmentFlag.AlignHCenter
+
+        title_widget.setFixedHeight(LABEL_H)
+        col.addWidget(title_widget, 0, center)
+        col.addWidget(entry, 0, center)
+        col.addWidget(gauge, 0, center)
+        col.addWidget(secondary if secondary is not None
+                      else self._placeholder(ENTRY_H), 0, center)
+        col.addWidget(enabled_chk, 0, center)
+        col.addStretch(1)
+        return col
+
     def _build_ui(self):
         d = self._dialog
         main = QVBoxLayout(d)
-        main.setContentsMargins(12, 12, 12, 12)
+        main.setContentsMargins(10, 10, 10, 10)
 
         top_row = QHBoxLayout()
-        top_row.setSpacing(12)
+        top_row.setSpacing(8)
         main.addLayout(top_row, 1)
 
         # ═══════════════════════ Alert / Alarm 1 card ═══════════════════
         card1, c1 = make_card("Alert / Alarm 1", self._f_head)
         top_row.addWidget(card1, 1)
+
+        # spacer same height as the combo row of the Danger card
+        c1.addWidget(self._placeholder(COMBO_H))
+        c1.addSpacing(8)
+
         cols1 = QHBoxLayout()
-        cols1.setSpacing(30)
+        cols1.setSpacing(16)
         c1.addLayout(cols1, 1)
 
-        # --- Direct mil pp (Alert/Alarm 1) ---
-        col_direct1 = QVBoxLayout()
-        cols1.addLayout(col_direct1, 1)
-        col_direct1.addWidget(self._label("Direct\nmil pp", self._f_bold))
-
+        # --- Direct (Alert/Alarm 1) ---
+        self._label_direct1 = self._label(self._direct_label_text(), self._f_bold)
         self._entry_direct1 = self._value_box(self.direct1_value)
-        col_direct1.addWidget(self._entry_direct1, 0, Qt.AlignmentFlag.AlignHCenter)
         self._entry_direct1.textEdited.connect(lambda _t: self._on_direct1_realtime())
         self._entry_direct1.editingFinished.connect(self._on_direct1_validate)
-
         self._gauge_direct1 = VerticalGauge(self._fonts_map, self.colors)
-        col_direct1.addWidget(self._gauge_direct1, 1)
+        self._en_direct1 = self._enabled_check()
+        cols1.addLayout(self._build_column(
+            self._label_direct1, self._entry_direct1, self._gauge_direct1,
+            None, self._en_direct1), 1)
         self._update_direct1_gauge()
 
-        self._en_direct1 = self._enabled_check()
-        col_direct1.addWidget(self._en_direct1, 0, Qt.AlignmentFlag.AlignHCenter)
-
         # --- Gap Vdc (Alert/Alarm 1) ---
-        col_gap = QVBoxLayout()
-        cols1.addLayout(col_gap, 1)
-        col_gap.addWidget(self._label("Gap\nVdc", self._f_bold))
-
         self._entry_gap = self._value_box(self.gap_value)
-        col_gap.addWidget(self._entry_gap, 0, Qt.AlignmentFlag.AlignHCenter)
         self._entry_gap.textEdited.connect(lambda _t: self._on_gap_realtime())
         self._entry_gap.editingFinished.connect(self._on_gap_validate)
-
         self._gauge_gap = VerticalGauge(self._fonts_map, self.colors)
-        col_gap.addWidget(self._gauge_gap, 1)
-        self._update_gap_gauge()
-
         self._gap_secondary_box = self._value_box(self.gap_secondary)
-        col_gap.addWidget(self._gap_secondary_box, 0, Qt.AlignmentFlag.AlignHCenter)
         self._gap_secondary_box.textEdited.connect(lambda _t: self._on_gap_secondary_realtime())
         self._gap_secondary_box.editingFinished.connect(self._on_gap_secondary_validate)
-
         self._en_gap = self._enabled_check()
-        col_gap.addWidget(self._en_gap, 0, Qt.AlignmentFlag.AlignHCenter)
+        cols1.addLayout(self._build_column(
+            self._label("Gap\nVdc", self._f_bold), self._entry_gap, self._gauge_gap,
+            self._gap_secondary_box, self._en_gap), 1)
+        self._update_gap_gauge()
 
         # ═══════════════════════ Danger / Alarm 2 card ═══════════════════
         card2, c2 = make_card("Danger / Alarm 2", self._f_head)
@@ -448,41 +586,43 @@ class SetpointsDialog:
         mode_row.addWidget(mode2)
         mode_row.addStretch(1)
         c2.addLayout(mode_row)
-        c2.addSpacing(12)
+        c2.addSpacing(8)
 
-        col_direct2 = QVBoxLayout()
-        c2.addLayout(col_direct2, 1)
-        col_direct2.addWidget(self._label("Direct mil\npp", self._f_bold))
+        cols2 = QHBoxLayout()
+        c2.addLayout(cols2, 1)
 
+        self._label_direct2 = self._label(self._direct_label_text(), self._f_bold)
         self._entry_direct2 = self._value_box(self.direct2_value)
-        col_direct2.addWidget(self._entry_direct2, 0, Qt.AlignmentFlag.AlignHCenter)
         self._entry_direct2.textEdited.connect(lambda _t: self._on_direct2_realtime())
         self._entry_direct2.editingFinished.connect(self._on_direct2_validate)
-
         self._gauge_direct2 = VerticalGauge(self._fonts_map, self.colors)
-        col_direct2.addWidget(self._gauge_direct2, 1)
+        self._en_direct2 = self._enabled_check()
+        cols2.addStretch(1)
+        cols2.addLayout(self._build_column(
+            self._label_direct2, self._entry_direct2, self._gauge_direct2,
+            None, self._en_direct2))
+        cols2.addStretch(1)
         self._update_direct2_gauge()
 
-        self._en_direct2 = self._enabled_check()
-        col_direct2.addWidget(self._en_direct2, 0, Qt.AlignmentFlag.AlignHCenter)
-
         # ═══════════════════════ Bottom bar ═══════════════════════
-        main.addSpacing(12)
+        main.addSpacing(8)
         main.addWidget(hline(T["group_border"], 1))
-        main.addSpacing(10)
+        main.addSpacing(6)
 
         bottom = QHBoxLayout()
         main.addLayout(bottom)
 
-        chan_combo = self._combo(["channel 1", "channel 2", "channel 3", "channel 4"], "channel 1")
+        chan_combo = self._combo(["channel 1", "channel 2", "channel 3", "channel 4"],
+                                 f"channel {self._channel_num}")
+        chan_combo.currentTextChanged.connect(self._on_channel_change)
         bottom.addWidget(chan_combo)
-        bottom.addSpacing(12)
+        bottom.addSpacing(8)
 
         monitor_combo = self._combo(["3000/12M/DIS", "3000/12M/DIS-A", "3000/12M/DIS-B"],
                                     self.monitor_selection)
         monitor_combo.currentTextChanged.connect(self._on_monitor_change)
         bottom.addWidget(monitor_combo)
-        bottom.addSpacing(16)
+        bottom.addSpacing(12)
 
         vms_badge = QLabel("VMS 3000")
         vms_badge.setFont(self._f_vms)
@@ -498,7 +638,7 @@ class SetpointsDialog:
             ("Ok",       self._on_ok,            "primary", True),
         ):
             bottom.addWidget(make_pill_button(text, cb, self._f_norm, kind, enabled))
-            bottom.addSpacing(6)
+            bottom.addSpacing(4)
 
     # ──────────────────────────────────────────────────────────────────
     #  Helpers
@@ -508,14 +648,15 @@ class SetpointsDialog:
         cb.setFont(self._f_small)
         cb.addItems(values)
         cb.setCurrentText(current)
-        cb.setStyleSheet("QComboBox { background:#ffffff; color:#1a2533; padding:3px 6px; }")
+        cb.setFixedHeight(COMBO_H)
+        cb.setStyleSheet("QComboBox { background:#ffffff; color:#1a2533; padding:2px 6px; }")
         return cb
 
     def _value_box(self, value):
         e = QLineEdit(str(value))
         e.setAlignment(Qt.AlignmentFlag.AlignCenter)
         e.setFont(self._f_norm)
-        e.setFixedWidth(QFontMetrics(self._f_norm).horizontalAdvance("0") * 6 + 16)
+        e.setFixedSize(QFontMetrics(self._f_norm).horizontalAdvance("0") * 6 + 16, ENTRY_H)
         e.setStyleSheet(
             f"QLineEdit {{ background:{T['entry_bg']}; color:{T['text']};"
             " border:2px inset #8a8f98; padding:1px; }"
@@ -561,6 +702,23 @@ class SetpointsDialog:
             self._update_gap_gauge()
         else:
             self._reset_gauge_display()
+
+    def _on_channel_change(self, text):
+        """Handle channel selection change - reload configuration for the new channel."""
+        if "channel" in text.lower():
+            self._channel_num = int(text.split()[-1])
+            self._load_channel_configuration()
+            self._entry_direct1.setText(str(self.direct1_value))
+            self._entry_direct2.setText(str(self.direct2_value))
+            self._entry_gap.setText(str(self.gap_value))
+            self._gap_secondary_box.setText(str(self.gap_secondary))
+            if self._label_direct1:
+                self._label_direct1.setText(self._direct_label_text())
+            if self._label_direct2:
+                self._label_direct2.setText(self._direct_label_text())
+            self._update_direct1_gauge()
+            self._update_direct2_gauge()
+            self._update_gap_gauge()
 
     # --- generic helpers for the "realtime" (while typing) and "validate"
     #     (on Enter / focus-out) handlers -----------------------------------
@@ -608,7 +766,7 @@ class SetpointsDialog:
 
     def _on_direct1_validate(self):
         self._validate(self._entry_direct1, "direct1_value", 3, self._update_direct1_gauge, [
-            (lambda v: v >= 10, "value cannot be '10' mil"),
+            (lambda v: v >= self.direct1_top, f"value cannot be '{self.direct1_top}'"),
             (lambda v: v >= self.direct2_value, "Alert value must be less than Danger value"),
         ])
 
@@ -617,7 +775,7 @@ class SetpointsDialog:
 
     def _on_direct2_validate(self):
         self._validate(self._entry_direct2, "direct2_value", 6, self._update_direct2_gauge, [
-            (lambda v: v >= 10, "value cannot be '10' mil"),
+            (lambda v: v >= self.direct2_top, f"value cannot be '{self.direct2_top}'"),
             (lambda v: v <= self.direct1_value, "Danger value must be greater than Alert value"),
         ])
 
@@ -643,17 +801,17 @@ class SetpointsDialog:
     # ──────────────────────────────────────────────────────────────────
     #  Gauge update helpers
     # ──────────────────────────────────────────────────────────────────
+    def _direct_color(self, value):
+        if value <= self._green_threshold:
+            return self.colors["gauge_green"]
+        if value <= self._yellow_threshold:
+            return self.colors["gauge_yellow"]
+        return self.colors["gauge_red"]
+
     def _update_direct1_gauge(self):
         if self._gauge_direct1:
-            if self.direct1_value <= 5:
-                color = self.colors["gauge_green"]
-            elif self.direct1_value <= 8:
-                color = self.colors["gauge_yellow"]
-            else:
-                color = self.colors["gauge_red"]
-
             self._gauge_direct1.configure_gauge(
-                zones=[(0.00, 1.00, color)],
+                zones=[(0.00, 1.00, self._direct_color(self.direct1_value))],
                 top_text=str(self.direct1_top),
                 bottom_text=str(self.direct1_bottom),
                 pointer_frac=self._frac(self.direct1_value, self.direct1_top, self.direct1_bottom),
@@ -661,15 +819,8 @@ class SetpointsDialog:
 
     def _update_direct2_gauge(self):
         if self._gauge_direct2:
-            if self.direct2_value <= 5:
-                color = self.colors["gauge_green"]
-            elif self.direct2_value <= 8:
-                color = self.colors["gauge_yellow"]
-            else:
-                color = self.colors["gauge_red"]
-
             self._gauge_direct2.configure_gauge(
-                zones=[(0.00, 1.00, color)],
+                zones=[(0.00, 1.00, self._direct_color(self.direct2_value))],
                 top_text=str(self.direct2_top),
                 bottom_text=str(self.direct2_bottom),
                 pointer_frac=self._frac(self.direct2_value, self.direct2_top, self.direct2_bottom),
@@ -727,11 +878,12 @@ class SetpointsDialog:
         for g in (self._gauge_direct1, self._gauge_direct2, self._gauge_gap):
             if g is not None:
                 g.set_colors(self.colors)
-        self._refresh_gauge(lambda: None)
         if self.monitor_selection == "3000/12M/DIS":
             self._update_direct1_gauge()
             self._update_direct2_gauge()
             self._update_gap_gauge()
+        else:
+            self._reset_gauge_display()
 
     # ──────────────────────────────────────────────────────────────────
     def _on_color_config(self):
@@ -740,7 +892,7 @@ class SetpointsDialog:
         dlg.setModal(True)
         dlg.setObjectName("colorDlg")
         dlg.setStyleSheet(f"QDialog#colorDlg {{ background:{T['win_bg']}; }}")
-        dlg.setFixedSize(450, 400)
+        dlg.setFixedSize(400, 360)
 
         root = QVBoxLayout(dlg)
         root.setContentsMargins(0, 0, 0, 0)
@@ -748,12 +900,12 @@ class SetpointsDialog:
 
         titlebar = QLabel("  Color Configuration")
         titlebar.setFont(self._f_bold)
-        titlebar.setFixedHeight(32)
+        titlebar.setFixedHeight(28)
         titlebar.setStyleSheet(f"background:{T['titlebar']}; color:{T['card_header_fg']};")
         root.addWidget(titlebar)
 
         wrap = QVBoxLayout()
-        wrap.setContentsMargins(12, 12, 12, 12)
+        wrap.setContentsMargins(10, 10, 10, 10)
         root.addLayout(wrap, 1)
 
         card, cl = make_card("GAUGE COLORS", self._f_head)
@@ -782,7 +934,7 @@ class SetpointsDialog:
             row.addWidget(edit)
 
             preview = QFrame()
-            preview.setFixedSize(35, 22)
+            preview.setFixedSize(35, 20)
             preview.setStyleSheet(f"background:{self.colors[key]}; border:1px solid #000;")
             row.addWidget(preview)
             row.addStretch(1)
@@ -799,7 +951,6 @@ class SetpointsDialog:
         def apply_colors():
             for key, edit in color_edits.items():
                 text = edit.text().strip()
-                # ignore invalid colour strings instead of breaking the gauge
                 if QColor(text).isValid():
                     self.colors[key] = text
             self._apply_colors()
@@ -812,7 +963,7 @@ class SetpointsDialog:
             self._apply_colors()
 
         btns = QHBoxLayout()
-        btns.setContentsMargins(12, 0, 12, 12)
+        btns.setContentsMargins(10, 0, 10, 10)
         btns.addStretch(1)
         btns.addWidget(make_pill_button("Cancel", dlg.reject, self._f_norm, "outline"))
         btns.addWidget(make_pill_button("Reset", reset_colors, self._f_norm, "outline"))
@@ -827,7 +978,7 @@ class SetpointsDialog:
 #  Standalone demo
 # ══════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    from PyQt6.QtWidgets import QApplication, QPushButton
+    from PyQt6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")

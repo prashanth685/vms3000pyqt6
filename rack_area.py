@@ -682,7 +682,7 @@ class RackArea(QWidget):
                 ProximityMonitor3000ConfigDialog(self._canvas, slot, model=model).show()
 
             def on_setpoints(slot):
-                SetpointsDialog(self._canvas, fonts, slot).show()
+                SetpointsDialog(self._canvas, fonts, slot, channel_num=1).show()
 
             def on_point_names(slot):
                 # TODO: Implement Point Names dialog

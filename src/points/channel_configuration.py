@@ -550,6 +550,7 @@ class ChannelConfigurationDialog:
             "0-15 mil pp",
             "0-20 mil pp",
             "0-100 mil pp",
+            "0-100 µm pp",
             "0-150 µm pp",
             "0-200 µm pp",
             "0-400 µm pp",
