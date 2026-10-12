@@ -28,6 +28,7 @@ from popups.monitors import CascadingMenu
 from popups.module_switch_confirmation import ModuleSwitchConfirmationPopup
 from snapshot.racksnapshot import get_module_config, is_image_display_module
 from points.point_options import PointOptionsContextMenu
+from points.channel_configuration import ChannelConfigurationDialog
 from points.setpoins import SetpointsDialog
 from points.proximiter12m_ridial import ProximityMonitor3000ConfigDialog
 from points.relay_config import RelayConfigDialog
@@ -240,6 +241,7 @@ class RackArea(QWidget):
                 "timestamp": datetime.datetime.now().isoformat(),
                 "slot_data": self._slot_data,
                 "slot_count": SLOT_COUNT,
+                "channel_configs": ChannelConfigurationDialog._channel_configs,
             }
             with open(file_path, "w") as f:
                 json.dump(config, f, indent=2)
@@ -264,6 +266,12 @@ class RackArea(QWidget):
 
             self._slot_data.clear()
             self._slot_data.update(config.get("slot_data", {}))
+
+            # Restore channel configurations
+            channel_configs = config.get("channel_configs", {})
+            if channel_configs:
+                ChannelConfigurationDialog._channel_configs = channel_configs
+
             self._selected = None
             self.draw()
             show_info(self._canvas, "Load Configuration", f"Configuration loaded from {file_path}")
@@ -682,7 +690,12 @@ class RackArea(QWidget):
                 ProximityMonitor3000ConfigDialog(self._canvas, slot, model=model).show()
 
             def on_setpoints(slot):
-                SetpointsDialog(self._canvas, fonts, slot, channel_num=1).show()
+                # Use different setpoints dialog for 6M vs 12M/DIS
+                if _is_6m_module(module):
+                    from points.setpoins_6m import SetpointsDialog6M
+                    SetpointsDialog6M(self._canvas, fonts, slot, channel_num=1, model="6M").show()
+                else:
+                    SetpointsDialog(self._canvas, fonts, slot, channel_num=1, model="12M/DIS").show()
 
             def on_point_names(slot):
                 # TODO: Implement Point Names dialog

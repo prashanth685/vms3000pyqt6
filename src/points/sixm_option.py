@@ -94,8 +94,18 @@ class SixMOptionsDialog:
         # Channel Pair Type references for copying
         self._pair_type_combos = {}
 
+        # Restore configured channels from saved configuration
+        self._restore_configured_channels()
+
     def _f(self, key, size=9, bold=False, italic=False, family=FONT_NAME):
         return pick_font(self._fonts, key, family, size, bold, italic)
+
+    def _restore_configured_channels(self):
+        """Restore configured channels from saved configuration."""
+        model_storage = ChannelConfigurationDialog._channel_configs.get(self._model, {})
+        for channel_num in range(1, 5):  # Channels 1-4
+            if channel_num in model_storage:
+                self._configured_channels.add(channel_num)
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -133,6 +143,9 @@ class SixMOptionsDialog:
             "Channel Pair 3 and 4", "Channel 3", "Channel 4", 3, 4), 1)
 
         self._create_buttons(body)
+
+        # Update copy buttons after building UI to enable them based on loaded config
+        self._update_copy_buttons()
 
         d.adjustSize()
         hint = d.sizeHint()
@@ -353,10 +366,12 @@ class SixMOptionsDialog:
             if pair_key in self._pair_type_combos:
                 pair_type = self._pair_type_combos[pair_key].currentText()
                 # Store pair type in the channel config
-                config = ChannelConfigurationDialog.get_channel_config(channel_num)
+                config = ChannelConfigurationDialog.get_channel_config(channel_num, self._model)
                 if config:
                     config["pair_type"] = pair_type
-                    ChannelConfigurationDialog._channel_configs[channel_num] = config
+                    model_storage = ChannelConfigurationDialog._channel_configs.get(self._model, {})
+                    model_storage[channel_num] = config
+                    ChannelConfigurationDialog._channel_configs[self._model] = model_storage
 
             self._update_copy_buttons()
 
@@ -427,7 +442,7 @@ class SixMOptionsDialog:
         print(f"Copying configuration from Channel {from_channel} to Channel {to_channel}")
 
         # Use the static copy method from ChannelConfigurationDialog
-        success = ChannelConfigurationDialog.copy_configuration(from_channel, to_channel)
+        success = ChannelConfigurationDialog.copy_configuration(from_channel, to_channel, self._model)
 
         if success:
             self._configured_channels.add(to_channel)
@@ -471,7 +486,7 @@ class SixMOptionsDialog:
 
         # Copy each channel's configuration
         for src_ch, dst_ch in zip(source_channels, dest_channels):
-            success = ChannelConfigurationDialog.copy_configuration(src_ch, dst_ch)
+            success = ChannelConfigurationDialog.copy_configuration(src_ch, dst_ch, self._model)
             if success:
                 self._configured_channels.add(dst_ch)
                 print(f"Copied Channel {src_ch} -> Channel {dst_ch}")

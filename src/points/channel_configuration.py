@@ -87,8 +87,11 @@ def classic_group(title: str, font) -> QGroupBox:
 class ChannelConfigurationDialog:
     """Channel-N Configuration dialog."""
 
-    # Static storage for channel configurations
-    _channel_configs = {}  # {channel_num: config_dict}
+    # Static storage for channel configurations, separated by model
+    _channel_configs = {
+        "12M/DIS": {},  # {channel_num: config_dict}
+        "6M": {},       # {channel_num: config_dict}
+    }
 
     # ------------------------------------------------------------------ #
     #  Init
@@ -190,7 +193,7 @@ class ChannelConfigurationDialog:
 
         # Load existing configuration if available
         if self._load_existing:
-            existing_config = self.get_channel_config(self._channel_num)
+            existing_config = self.get_channel_config(self._channel_num, self._model)
             if existing_config:
                 self._load_configuration(existing_config)
 
@@ -549,7 +552,6 @@ class ChannelConfigurationDialog:
             "0-10 mil pp",
             "0-15 mil pp",
             "0-20 mil pp",
-            "0-100 mil pp",
             "0-100 µm pp",
             "0-150 µm pp",
             "0-200 µm pp",
@@ -1129,7 +1131,9 @@ class ChannelConfigurationDialog:
 
         # Save the current configuration
         config = self._get_configuration()
-        ChannelConfigurationDialog._channel_configs[self._channel_num] = config
+        model_storage = ChannelConfigurationDialog._channel_configs.get(self._model, {})
+        model_storage[self._channel_num] = config
+        ChannelConfigurationDialog._channel_configs[self._model] = model_storage
 
         if self._on_ok_callback:
             self._on_ok_callback(
@@ -1205,22 +1209,26 @@ class ChannelConfigurationDialog:
         # Note: pair_type is handled by the parent dialog, not this one
 
     @classmethod
-    def copy_configuration(cls, from_channel, to_channel):
+    def copy_configuration(cls, from_channel, to_channel, model="12M/DIS"):
         """Copy configuration from one channel to another."""
-        if from_channel in cls._channel_configs:
-            cls._channel_configs[to_channel] = dict(cls._channel_configs[from_channel])
+        model_storage = cls._channel_configs.get(model, {})
+        if from_channel in model_storage:
+            model_storage[to_channel] = dict(model_storage[from_channel])
+            cls._channel_configs[model] = model_storage
             return True
         return False
 
     @classmethod
-    def get_channel_config(cls, channel_num):
+    def get_channel_config(cls, channel_num, model="12M/DIS"):
         """Get configuration for a specific channel."""
-        return cls._channel_configs.get(channel_num)
+        model_storage = cls._channel_configs.get(model, {})
+        return model_storage.get(channel_num)
 
     @classmethod
-    def has_configuration(cls, channel_num):
+    def has_configuration(cls, channel_num, model="12M/DIS"):
         """Check if a channel has been configured."""
-        return channel_num in cls._channel_configs
+        model_storage = cls._channel_configs.get(model, {})
+        return channel_num in model_storage
 
     def _on_set_defaults(self):
         """

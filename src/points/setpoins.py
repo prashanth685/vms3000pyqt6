@@ -14,6 +14,7 @@ Compact "card" UI with vertical meter-style gauges:
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -314,11 +315,12 @@ _DEFAULT_COLORS = {
 class SetpointsDialog:
     """Setpoints - Radial Vibration configuration dialog for a DIS_MODULE channel."""
 
-    def __init__(self, parent, fonts, slot_num, channel_num=1):
+    def __init__(self, parent, fonts, slot_num, channel_num=1, model="12M/DIS"):
         self._parent = parent
         self._fonts = fonts
         self._slot_num = slot_num
         self._channel_num = channel_num
+        self._model = model
         self._dialog = None
         self._validating = False        # re-entrancy guard (message box steals focus)
 
@@ -358,88 +360,129 @@ class SetpointsDialog:
         # ---- Load configured values from channel configuration ----
         self._load_channel_configuration()
 
+    # ──────────────────────────────────────────────────────────────────
+    #  Scale parsing
+    # ──────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _parse_direct_scale(direct_scale):
+        """
+        Parse a scale string like:
+            "0-10 mil pp", "0-100 mil pp", "0-150 µm pp", "0-500 um pp"
+        into a tuple (bottom, top, unit) where unit is "mil" or "µm".
+
+        Returns None if the string cannot be parsed.
+
+        NOTE: We use regex here rather than substring matching because
+        "0-10" is a substring of "0-100", which caused 0-100 scales to be
+        mis-parsed as 0-10.
+        """
+        if not direct_scale:
+            return None
+        # Accept "mil", "µm", "um", "μm" (various micro signs)
+        m = re.search(r'(\d+)\s*-\s*(\d+)\s*(mil|µm|um|μm)\b',
+                      direct_scale, flags=re.IGNORECASE)
+        if not m:
+            return None
+        bottom = int(m.group(1))
+        top = int(m.group(2))
+        unit_raw = m.group(3).lower()
+        unit = "mil" if unit_raw == "mil" else "µm"
+        return bottom, top, unit
+
     def _load_channel_configuration(self):
         """Load configured direct scale and clamp values from channel configuration."""
-        config = ChannelConfigurationDialog.get_channel_config(self._channel_num)
-        if config:
-            direct_scale = config.get("direct_scale", "0-10 mil pp")
-            direct_clamp = config.get("direct_clamp", 0)
+        config = ChannelConfigurationDialog.get_channel_config(self._channel_num, self._model)
+        if not config:
+            return
 
-            # Parse the scale to determine the range (keep original units)
-            if "0-10" in direct_scale and "mil" in direct_scale:
-                self.direct1_top = 10
-                self.direct1_bottom = 0
-                self._scale_unit = "mil"
-            elif "0-15" in direct_scale:
-                self.direct1_top = 15
-                self.direct1_bottom = 0
-                self._scale_unit = "mil"
-            elif "0-20" in direct_scale:
-                self.direct1_top = 20
-                self.direct1_bottom = 0
-                self._scale_unit = "mil"
-            elif "0-100" in direct_scale and "mil" in direct_scale:
-                self.direct1_top = 100
-                self.direct1_bottom = 0
-                self._scale_unit = "mil"
-            elif "0-100" in direct_scale and "µm" in direct_scale:
-                self.direct1_top = 100
-                self.direct1_bottom = 0
-                self._scale_unit = "µm"
-            elif "150" in direct_scale and "µm" in direct_scale:
-                self.direct1_top = 150
-                self.direct1_bottom = 0
-                self._scale_unit = "µm"
-            elif "200" in direct_scale and "µm" in direct_scale:
-                self.direct1_top = 200
-                self.direct1_bottom = 0
-                self._scale_unit = "µm"
-            elif "400" in direct_scale and "µm" in direct_scale:
-                self.direct1_top = 400
-                self.direct1_bottom = 0
-                self._scale_unit = "µm"
-            elif "500" in direct_scale and "µm" in direct_scale:
-                self.direct1_top = 500
-                self.direct1_bottom = 0
-                self._scale_unit = "µm"
+        direct_scale = config.get("direct_scale", "0-10 mil pp")
+        direct_clamp = config.get("direct_clamp", 0)
 
-            # Danger gauge always shares the same scale as Alert gauge
-            self.direct2_top = self.direct1_top
-            self.direct2_bottom = 0
+        parsed = self._parse_direct_scale(direct_scale)
+        if parsed is not None:
+            bottom, top, unit = parsed
+            self.direct1_bottom = bottom
+            self.direct1_top = top
+            self._scale_unit = unit
 
-            # Apply clamp value if it's set
-            if direct_clamp > 0:
-                self.direct1_value = min(direct_clamp, self.direct1_top)
-                self.direct2_value = min(direct_clamp * 2, self.direct1_top)
+            # Set default alert and danger values based on scale
+            if top == 10 and unit == "mil":
+                self.direct1_value = 3
+                self.direct2_value = 6
+            elif top == 15 and unit == "mil":
+                self.direct1_value = 4.5
+                self.direct2_value = 9
+            elif top == 20 and unit == "mil":
+                self.direct1_value = 6
+                self.direct2_value = 12
+            elif top == 100 and unit == "mil":
+                self.direct1_value = 30
+                self.direct2_value = 60
+            elif top == 100 and unit == "µm":
+                self.direct1_value = 30
+                self.direct2_value = 60
+            elif top == 150 and unit == "µm":
+                self.direct1_value = 45
+                self.direct2_value = 90
+            elif top == 200 and unit == "µm":
+                self.direct1_value = 60
+                self.direct2_value = 120
+            elif top == 400 and unit == "µm":
+                self.direct1_value = 120
+                self.direct2_value = 240
+            elif top == 500 and unit == "µm":
+                self.direct1_value = 150
+                self.direct2_value = 300
 
-            self._update_gauge_colors_from_config(direct_scale)
+        # Danger gauge always shares the same scale as Alert gauge
+        self.direct2_top = self.direct1_top
+        self.direct2_bottom = self.direct1_bottom
+
+        # Apply clamp value if it's set (overrides defaults)
+        if direct_clamp > 0:
+            self.direct1_value = min(direct_clamp, self.direct1_top)
+            self.direct2_value = min(direct_clamp * 2, self.direct1_top)
+
+        self._update_gauge_colors_from_config(direct_scale)
 
     def _update_gauge_colors_from_config(self, direct_scale):
         """Update gauge color thresholds based on the configured direct scale."""
+        # Defaults (for 0-10 mil)
         self._green_threshold = 5
         self._yellow_threshold = 8
 
-        if "0-15" in direct_scale:
-            self._green_threshold = 7.5
-            self._yellow_threshold = 12
-        elif "0-20" in direct_scale:
-            self._green_threshold = 10
-            self._yellow_threshold = 16
-        elif "0-100" in direct_scale:
-            self._green_threshold = 50
-            self._yellow_threshold = 80
-        elif "150" in direct_scale and "µm" in direct_scale:
-            self._green_threshold = 75
-            self._yellow_threshold = 120
-        elif "200" in direct_scale and "µm" in direct_scale:
-            self._green_threshold = 100
-            self._yellow_threshold = 160
-        elif "400" in direct_scale and "µm" in direct_scale:
-            self._green_threshold = 200
-            self._yellow_threshold = 320
-        elif "500" in direct_scale and "µm" in direct_scale:
-            self._green_threshold = 250
-            self._yellow_threshold = 400
+        parsed = self._parse_direct_scale(direct_scale)
+        if parsed is None:
+            return
+        _bottom, top, unit = parsed
+
+        if unit == "mil":
+            if top == 15:
+                self._green_threshold = 7.5
+                self._yellow_threshold = 12
+            elif top == 20:
+                self._green_threshold = 10
+                self._yellow_threshold = 16
+            elif top == 100:
+                self._green_threshold = 50
+                self._yellow_threshold = 80
+            # top == 10 keeps the defaults above
+        else:  # µm
+            if top == 100:
+                self._green_threshold = 50
+                self._yellow_threshold = 80
+            elif top == 150:
+                self._green_threshold = 75
+                self._yellow_threshold = 120
+            elif top == 200:
+                self._green_threshold = 100
+                self._yellow_threshold = 160
+            elif top == 400:
+                self._green_threshold = 200
+                self._yellow_threshold = 320
+            elif top == 500:
+                self._green_threshold = 250
+                self._yellow_threshold = 400
 
     # ──────────────────────────────────────────────────────────────────
     def _direct_label_text(self):
