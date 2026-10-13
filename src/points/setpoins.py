@@ -843,49 +843,76 @@ class SetpointsDialog:
     def _show_alert_message(self, message="value cannot be '10' mil"):
         show_warning(self._dialog, "Alert", message)
 
-    # ──────────────────────────────────────────────────────────────────
-    #  Gauge update helpers
-    # ──────────────────────────────────────────────────────────────────
-    def _direct_color(self, value):
-        if value <= self._green_threshold:
-            return self.colors["gauge_green"]
-        if value <= self._yellow_threshold:
-            return self.colors["gauge_yellow"]
-        return self.colors["gauge_red"]
+
+
+    def _direct_color(self, value, top, bottom,
+                  upper="gauge_yellow", lower="gauge_green"):
+            """
+            Build the colour zones for a Direct gauge, split at the pointer.
+            Fractions run from the TOP (0.0 = top of scale, 1.0 = bottom).
+            Returns (pointer_frac, zones).
+            """
+            pointer_frac = self._frac(value, top, bottom)
+            zones = [
+                (0.00, pointer_frac, self.colors[upper]),   # above the pointer
+                (pointer_frac, 1.00, self.colors[lower]),   # below the pointer
+            ]
+            return pointer_frac, zones
+
 
     def _update_direct1_gauge(self):
         if self._gauge_direct1:
+            pointer_frac, zones = self._direct_color(
+                self.direct1_value, self.direct1_top, self.direct1_bottom,
+                upper="gauge_yellow", lower="gauge_green")
             self._gauge_direct1.configure_gauge(
-                zones=[(0.00, 1.00, self._direct_color(self.direct1_value))],
+                zones=zones,
                 top_text=str(self.direct1_top),
                 bottom_text=str(self.direct1_bottom),
-                pointer_frac=self._frac(self.direct1_value, self.direct1_top, self.direct1_bottom),
+                pointer_frac=pointer_frac,
             )
 
     def _update_direct2_gauge(self):
         if self._gauge_direct2:
+            # Calculate pointer fraction
+            pointer_frac = self._frac(self.direct2_value, self.direct2_top, self.direct2_bottom)
+
+            # Green fill from bottom to value, red from value to top
+            zones = [(0.00, pointer_frac, self.colors["gauge_red"]),
+                     (pointer_frac, 1.00, self.colors["gauge_green"])]
+
             self._gauge_direct2.configure_gauge(
-                zones=[(0.00, 1.00, self._direct_color(self.direct2_value))],
+                zones=zones,
                 top_text=str(self.direct2_top),
                 bottom_text=str(self.direct2_bottom),
-                pointer_frac=self._frac(self.direct2_value, self.direct2_top, self.direct2_bottom),
+                pointer_frac=pointer_frac,
             )
 
     def _update_gap_gauge(self):
         if self._gauge_gap:
-            if self.gap_value >= -15:
-                color = self.colors["gauge_green"]
-            elif self.gap_value >= -20:
-                color = self.colors["gauge_yellow"]
+            # Calculate fractions for primary and secondary pointers
+            pointer_frac = self._frac(self.gap_value, self.gap_top, self.gap_bottom)
+            pointer2_frac = self._frac(self.gap_secondary, self.gap_top, self.gap_bottom)
+
+            # Determine color zones based on values
+            # Green from bottom to gap_value, yellow from gap_value to gap_secondary
+            if pointer_frac < pointer2_frac:
+                # Primary pointer is below secondary
+                zones = [(0.00, pointer_frac, self.colors["gauge_yellow"]),
+                         (pointer_frac, pointer2_frac, self.colors["gauge_green"]),
+                         (pointer2_frac, 1.00, self.colors["gauge_yellow"])]
             else:
-                color = self.colors["gauge_red"]
+                # Primary pointer is above secondary
+                zones = [(0.00, pointer2_frac, self.colors["gauge_yellow"]),
+                         (pointer2_frac, pointer_frac, self.colors["gauge_yellow"]),
+                         (pointer_frac, 1.00, self.colors["gauge_red"])]
 
             self._gauge_gap.configure_gauge(
-                zones=[(0.00, 1.00, color)],
+                zones=zones,
                 top_text=str(self.gap_top),
                 bottom_text=str(self.gap_bottom),
-                pointer_frac=self._frac(self.gap_value, self.gap_top, self.gap_bottom),
-                pointer2_frac=self._frac(self.gap_secondary, self.gap_top, self.gap_bottom),
+                pointer_frac=pointer_frac,
+                pointer2_frac=pointer2_frac,
             )
 
     def _reset_gauge_display(self):
