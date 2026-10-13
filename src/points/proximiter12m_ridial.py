@@ -98,8 +98,9 @@ class ProximityMonitor3000ConfigDialog:
     def _restore_configured_channels(self):
         """Restore configured channels from saved configuration."""
         model_storage = ChannelConfigurationDialog._channel_configs.get(self._model, {})
+        slot_storage = model_storage.get(self._slot_num, {})
         for channel_num in range(1, 5):  # Channels 1-4
-            if channel_num in model_storage:
+            if channel_num in slot_storage:
                 self._configured_channels.add(channel_num)
 
     # ------------------------------------------------------------------ #
@@ -353,11 +354,13 @@ class ProximityMonitor3000ConfigDialog:
             if pair_key in self._pair_type_combos:
                 pair_type = self._pair_type_combos[pair_key].currentText()
                 # Store pair type in the channel config
-                config = ChannelConfigurationDialog.get_channel_config(channel_num, self._model)
+                config = ChannelConfigurationDialog.get_channel_config(channel_num, self._slot_num, self._model)
                 if config:
                     config["pair_type"] = pair_type
                     model_storage = ChannelConfigurationDialog._channel_configs.get(self._model, {})
-                    model_storage[channel_num] = config
+                    slot_storage = model_storage.get(self._slot_num, {})
+                    slot_storage[channel_num] = config
+                    model_storage[self._slot_num] = slot_storage
                     ChannelConfigurationDialog._channel_configs[self._model] = model_storage
 
             self._update_copy_buttons()
@@ -429,7 +432,7 @@ class ProximityMonitor3000ConfigDialog:
         print(f"Copying configuration from Channel {from_channel} to Channel {to_channel}")
 
         # Use the static copy method from ChannelConfigurationDialog
-        success = ChannelConfigurationDialog.copy_configuration(from_channel, to_channel, self._model)
+        success = ChannelConfigurationDialog.copy_configuration(from_channel, to_channel, self._slot_num, self._model)
 
         if success:
             self._configured_channels.add(to_channel)
@@ -473,7 +476,7 @@ class ProximityMonitor3000ConfigDialog:
 
         # Copy each channel's configuration
         for src_ch, dst_ch in zip(source_channels, dest_channels):
-            success = ChannelConfigurationDialog.copy_configuration(src_ch, dst_ch, self._model)
+            success = ChannelConfigurationDialog.copy_configuration(src_ch, dst_ch, self._slot_num, self._model)
             if success:
                 self._configured_channels.add(dst_ch)
                 print(f"Copied Channel {src_ch} -> Channel {dst_ch}")

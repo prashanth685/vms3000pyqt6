@@ -357,9 +357,6 @@ class SetpointsDialog:
         # ---- configurable colors ----
         self.colors = dict(_DEFAULT_COLORS)
 
-        # ---- Load configured values from channel configuration ----
-        self._load_channel_configuration()
-
     # ──────────────────────────────────────────────────────────────────
     #  Scale parsing
     # ──────────────────────────────────────────────────────────────────
@@ -391,7 +388,7 @@ class SetpointsDialog:
 
     def _load_channel_configuration(self):
         """Load configured direct scale and clamp values from channel configuration."""
-        config = ChannelConfigurationDialog.get_channel_config(self._channel_num, self._model)
+        config = ChannelConfigurationDialog.get_channel_config(self._channel_num, self._slot_num, self._model)
         if not config:
             return
 
@@ -514,6 +511,8 @@ class SetpointsDialog:
         }
 
         self._build_ui()
+        # Load configured values after building UI
+        self._load_channel_configuration()
         # Update labels with correct units after building UI
         unit_text = "mil pp" if self._scale_unit == "mil" else "µm pp"
         if self._label_direct1:
@@ -523,6 +522,9 @@ class SetpointsDialog:
         # Update entry boxes with loaded values
         self._entry_direct1.setText(str(self.direct1_value))
         self._entry_direct2.setText(str(self.direct2_value))
+        # Update gauges with loaded values
+        self._update_direct1_gauge()
+        self._update_direct2_gauge()
         center_on_parent(d, self._parent)
         d.exec()
 

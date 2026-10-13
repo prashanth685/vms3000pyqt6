@@ -270,7 +270,34 @@ class RackArea(QWidget):
             # Restore channel configurations
             channel_configs = config.get("channel_configs", {})
             if channel_configs:
-                ChannelConfigurationDialog._channel_configs = channel_configs
+                # Convert string keys back to integers (JSON converts int keys to strings)
+                converted_configs = {}
+                for model, slots in channel_configs.items():
+                    # Check if this is the old format (no slot numbers) or new format (with slot numbers)
+                    # Old format: {model: {channel_num: config}}
+                    # New format: {model: {slot_num: {channel_num: config}}}
+                    first_key = next(iter(slots.keys())) if slots else None
+                    if first_key and isinstance(slots[first_key], dict):
+                        # Check if the value is a channel config (has transducer_type) or a slot dict
+                        if "transducer_type" in slots[first_key]:
+                            # Old format - no slot numbers, assume slot 2
+                            converted_channels = {}
+                            for ch_num_str, ch_config in slots.items():
+                                converted_channels[int(ch_num_str)] = ch_config
+                            converted_configs[model] = {2: converted_channels}
+                        else:
+                            # New format - has slot numbers
+                            converted_slots = {}
+                            for slot_num_str, channels in slots.items():
+                                converted_channels = {}
+                                for ch_num_str, ch_config in channels.items():
+                                    converted_channels[int(ch_num_str)] = ch_config
+                                converted_slots[int(slot_num_str)] = converted_channels
+                            converted_configs[model] = converted_slots
+                    else:
+                        # Empty or invalid format
+                        converted_configs[model] = {}
+                ChannelConfigurationDialog._channel_configs = converted_configs
 
             self._selected = None
             self.draw()
