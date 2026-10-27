@@ -3,10 +3,16 @@ main.py — VMS 3000 Rack Configuration Software v0.5   (PyQt6)
 """
 
 import datetime
+import os
 import sys
 
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtWidgets import (
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in (_HERE, os.path.join(_HERE, "src")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
@@ -31,6 +37,15 @@ from src.sidebar.connection import (
     NetworkConnectDialog,
     disconnect_device,
 )
+from src.sidebar.rack_setup import cfg_to_rack_type, rack_type_to_cfg
+from qt_common import show_error, show_warning
+from core import tasks
+from core.app_state import AppState
+from core.rcs_file import RcsError
+from core.model import MT_NONE, MT_VMM_12M, SLOT_NUMBERS
+from ui_bridge import model_from_ui, ui_from_model
+from workers import run_task
+import ops_dialogs as ops
 
 
 class VMS3000(QMainWindow):
@@ -41,6 +56,9 @@ class VMS3000(QMainWindow):
         self.setWindowTitle(
             "VMS 3000  —  Rack Configuration Software  v0.5"
         )
+
+        self.state = AppState()
+        self.state.listeners.append(self._on_state_event)
 
         # Window size is controlled in main() using showMaximized()
         self.setStyleSheet(
@@ -70,15 +88,18 @@ class VMS3000(QMainWindow):
             "new": self._cmd_new,
             "open": self._cmd_open,
             "save": self._cmd_save,
-            "print": lambda: print("Print action"),
-            "settings": lambda: print("Settings action"),
-            "cut": lambda: print("Cut action"),
-            "copy": lambda: print("Copy action"),
-            "paste": lambda: print("Paste action"),
-            "upload": lambda: print("Upload action"),
-            "download": lambda: print("Download action"),
-            "refresh": lambda: print("Refresh action"),
+            "print": self._cmd_print,
+            "settings": self._cmd_comm,
+            "cut": self._cmd_cut,
+            "copy": self._cmd_copy,
+            "paste": self._cmd_paste,
+            "upload": self._cmd_upload,
+            "download": self._cmd_download,
+            "refresh": self._cmd_refresh,
             "help": self._cmd_about,
+            "direct_connect": self._cmd_direct_connect,
+            "network_connect": self._cmd_network_connect,
+            "disconnect": self._cmd_disconnect,
         }
 
         self._icons = build_toolbar(
@@ -123,6 +144,8 @@ class VMS3000(QMainWindow):
             body,
             self.F,
         )
+        self._rack.app_state = self.state
+        self._rack.on_change = self.state.mark_dirty
 
         body_lay.addWidget(
             self._rack,
@@ -153,10 +176,22 @@ class VMS3000(QMainWindow):
                 "direct_connect": self._cmd_direct_connect,
                 "network_connect": self._cmd_network_connect,
                 "disconnect": self._cmd_disconnect,
-                "calibrate": None,
+                    "calibrate": self._cmd_calibrate,
                 "diag": self._cmd_diag,
                 "comm": self._cmd_comm,
                 "about": self._cmd_about,
+                "cut": self._cmd_cut,
+                "copy": self._cmd_copy,
+                "paste": self._cmd_paste,
+                "select_all": self._cmd_select_all,
+                "upload": self._cmd_upload,
+                "download": self._cmd_download,
+                "events": self._cmd_events,
+                "rtc": self._cmd_rtc,
+                "alarm_inhibit": self._cmd_alarm_inhibit,
+                "trip_multiply": self._cmd_trip_multiply,
+                "traffic": self._cmd_traffic,
+                "rack_address": self._cmd_rack_address,
             },
         )
 
@@ -277,7 +312,7 @@ class VMS3000(QMainWindow):
 
     # ── Connection status ────────────────────────────────────────────
 
-    def _set_connection(self, connected: bool):
+    def _set_connection_label(self, connected: bool):
         color = (
             T["led_green"]
             if connected
@@ -315,76 +350,287 @@ class VMS3000(QMainWindow):
 
     # ── Commands ─────────────────────────────────────────────────────
 
+    # ── State observers ──────────────────────────────────────────────
+
+    def _on_state_event(self, event: str):
+        if event in ("dirty", "model", "connection"):
+            name = os.path.basename(self.state.file_path) if self.state.file_path else "Untitled"
+            star = " *" if self.state.dirty else ""
+            self.setWindowTitle(f"VMS 3000  —  Rack Configuration Software  v0.5   [{name}{star}]")
+        if event == "connection":
+            self._set_connection(self.state.connected)
+        if event == "settings":
+            self._icons.set_rack_address(self.state.settings.get("rack_address", 1))
+
+    def _set_connection(self, connected: bool):
+        super_set = VMS3000._set_connection_label
+        super_set(self, connected)
+        if connected:
+            self._conn_lbl.setText({"serial": "Connected (COM)", "network": "Connected (TCP)",
+                                    }.get(self.state.mode, "Connected"))
+
+    def _sync_to_model(self):
+        model_from_ui(self.state, self._rack)
+
+    def _sync_from_model(self):
+        ui_from_model(self.state, self._rack)
+
+    def _need_connection(self) -> bool:
+        if not self.state.connected:
+            show_warning(self, "Not connected", "Connect to a rack first (Connection menu or toolbar).")
+            return False
+        return True
+
+    def _error(self, title, exc):
+        show_error(self, title, str(exc) or exc.__class__.__name__)
+
+    def _confirm_discard(self) -> bool:
+        if not self.state.dirty:
+            return True
+        return ask_yes_no(self, "Unsaved changes", "The configuration has unsaved changes.\nContinue and lose them?")
+
+    # ── File commands ────────────────────────────────────────────────
+
     def _cmd_new(self):
-        if ask_yes_no(
-            self,
-            "New Configuration",
-            "Start a new configuration?\n"
-            "Unsaved changes will be lost.",
-        ):
+        if self._confirm_discard():
+            self.state.new()
             self._rack.clear()
 
     def _cmd_open(self):
-        self._rack.load_configuration()
+        if not self._confirm_discard():
+            return
+        path = LoadConfigDialog(self, self.F).show()
+        if not path:
+            return
+        try:
+            self.state.open_file(path)
+        except (RcsError, OSError, ValueError) as e:
+            self._error("Open configuration", e)
+            return
+        self._sync_from_model()
 
     def _cmd_save(self):
-        self._rack.save_configuration()
+        if not self.state.file_path:
+            return self._cmd_save_as()
+        self._do_save(self.state.file_path)
 
     def _cmd_save_as(self):
-        show_info(
-            self,
-            "Save As",
-            "Save As ready.",
-        )
+        default = os.path.splitext(os.path.basename(self.state.file_path))[0] if self.state.file_path else "Configuration"
+        path = SaveConfigDialog(self, self.F).show(default)
+        if path:
+            self._do_save(path)
+
+    def _do_save(self, path):
+        self._sync_to_model()
+        try:
+            self.state.save_file(path)
+        except (OSError, ValueError) as e:
+            self._error("Save configuration", e)
+            return
+        show_info(self, "Save Configuration", f"Configuration saved to\n{path}")
+
+    def _cmd_print(self):
+        show_info(self, "Print", "Use File > Save to export the configuration; printing is not implemented.")
 
     def _cmd_rack_setup(self):
+        card = self.state.card
 
-        def handle_rack_config(cfg: dict):
-            print(
-                f"Rack configuration: {cfg}"
-            )
+        def apply(cfg: dict):
+            card.rack_type_size = cfg_to_rack_type(cfg)
+            self.state.set_card(card)
 
-            # You can apply the configuration here
+        open_rack_setup(self, self.F, on_ok=apply, initial=rack_type_to_cfg(card.rack_type_size))
 
-        open_rack_setup(
-            self,
-            self.F,
-            on_ok=handle_rack_config,
-        )
+    # ── Connection commands ──────────────────────────────────────────
+
+    def _connect_with(self, title, fn):
+        ok, res = run_task(self, self.F, title, fn, cancellable=False)
+        if ok:
+            self.state.notify("connection")
+        else:
+            self._error(title, res)
+        return ok
 
     def _cmd_direct_connect(self):
-        # Update connection status only if
-        # the user actually pressed Connect
-        if DirectConnectDialog(
-            self,
-            self.F,
-        ).show():
-            self._set_connection(True)
+        s = self.state.settings
+        dlg = DirectConnectDialog(self, self.F, {"com_port": s["com_port"], "baud_rate": s["baud_rate"],
+                                                 "rack_address": s["rack_address"], "serial_config": "8N1"})
+        if not dlg.show():
+            return
+        v = dlg.values()
+
+        # Parse serial config (e.g., "8N1" -> bytesize=8, parity="N", stopbits=1)
+        serial_config = v.get("serial_config", "8N1")
+        from src.sidebar.connection import SERIAL_CONFIGS
+        config = SERIAL_CONFIGS.get(serial_config, SERIAL_CONFIGS["8N1"])
+
+        self._connect_with("Connecting...", lambda p, c: self.state.connect_serial(
+            v["com_port"], int(v["baud_rate"]), int(v["rack_address"]), v["connect_password"],
+            config["parity"], config["bytesize"], config["stopbits"], p))
 
     def _cmd_network_connect(self):
-        if NetworkConnectDialog(
-            self,
-            self.F,
-        ).show():
-            self._set_connection(True)
+        s = self.state.settings
+        dlg = NetworkConnectDialog(self, self.F, {"ip_address": s["host"], "port": s["tcp_port"],
+                                                  "timeout": s["timeout"], "rack_address": s["rack_address"]})
+        if not dlg.show():
+            return
+        v = dlg.values()
+        self._connect_with("Connecting...", lambda p, c: self.state.connect_network(
+            v["ip_address"], int(v["port"]), int(v["rack_address"]), v["connect_password"], float(v["timeout"]), p))
 
     def _cmd_disconnect(self):
-        if disconnect_device(self):
-            self._set_connection(False)
+        if self.state.connected and disconnect_device(self):
+            self.state.disconnect()
+
+    def _cmd_refresh(self):
+        if not self._need_connection():
+            return
+        ok, res = run_task(self, self.F, "Checking connection", lambda p, c: tasks.check_connection(self.state.link),
+                           cancellable=False)
+        if not ok or not res:
+            self.state.disconnect()
+            show_warning(self, "Connection", "The rack is no longer responding; disconnected.")
+
+    # ── Edit commands (module clipboard) ─────────────────────────────
+
+    def _selected_slot(self):
+        sel = self._rack._selected
+        if not sel:
+            show_info(self, "Select a slot", "Click a slot first.")
+            return None
+        vb = int(sel.split("_")[1]) - 1
+        if vb not in SLOT_NUMBERS:
+            show_info(self, "Select a slot", "The configuration panel cannot be copied or pasted.")
+            return None
+        return vb
+
+    def _cmd_copy(self):
+        vb = self._selected_slot()
+        if vb:
+            self._sync_to_model()
+            if not self.state.copy_slot(vb):
+                show_info(self, "Copy", "The selected slot has no module.")
+
+    def _cmd_cut(self):
+        vb = self._selected_slot()
+        if vb:
+            self._sync_to_model()
+            if self.state.cut_slot(vb):
+                self._sync_from_model()
+            else:
+                show_info(self, "Cut", "The selected slot has no module.")
+
+    def _cmd_paste(self):
+        vb = self._selected_slot()
+        if not vb:
+            return
+        clip = self.state.clipboard
+        if clip is None:
+            show_info(self, "Paste", "Nothing to paste.")
+            return
+        self._sync_to_model()
+        raw = vb + 1
+        data = self._rack._slot_data
+        if raw > 1 and data.get(f"0_{raw - 1}") == "3000/12M/DIS":
+            show_warning(self, "Paste", "This slot is the second half of a 3000/12M/DIS module.")
+            return
+        if clip.module == MT_VMM_12M:
+            if raw not in self._rack._DIS_ALLOWED_START_SLOTS or data.get(f"0_{raw + 1}"):
+                show_warning(self, "Paste", "3000/12M/DIS needs this slot and the next one to be free.")
+                return
+        if data.get(f"0_{raw}") and not ask_yes_no(self, "Paste", "Replace the module in this slot?"):
+            return
+        if self.state.paste_slot(vb):
+            self._sync_from_model()
+
+    def _cmd_select_all(self):
+        show_info(self, "Select All", "Select All applies to the setpoint and channel dialogs.")
+
+    # ── Rack operations ──────────────────────────────────────────────
+
+    def _cmd_upload(self):
+        if not self._need_connection():
+            return
+        if not ask_yes_no(self, "Upload from rack", "Read the configuration from the rack?\n"
+                                                     "The current screen will be replaced."):
+            return
+        ok, res = run_task(self, self.F, "Uploading configuration", lambda p, c: self.state.upload(p, c))
+        if not ok:
+            self._error("Upload", res)
+            return
+        self._sync_from_model()
+        if getattr(res, "warnings", None):
+            show_warning(self, "Upload", "\n".join(res.warnings))
+
+    def _cmd_download(self):
+        if not self._need_connection():
+            return
+        self._sync_to_model()
+        slots = [n for n in SLOT_NUMBERS if self.state.rack.slots[n].module != MT_NONE]
+        chosen = ops.pick_slots(self, self.F, "Download — select slots", slots) if slots else []
+        if chosen is None:
+            return
+        pw = ops.ask_password(self, self.F, "Download to rack", "Configuration password:")
+        if pw is None:
+            return
+        ok, res = run_task(self, self.F, "Downloading configuration",
+                           lambda p, c: self.state.download(pw, chosen, p, c))
+        if ok:
+            show_info(self, "Download", "Configuration downloaded to the rack.")
+        else:
+            self._error("Download", res)
+
+    def _monitored_slots(self):
+        return [n for n in SLOT_NUMBERS if self.state.rack.slots[n].module != MT_NONE]
+
+    def _cmd_events(self):
+        if self._need_connection():
+            self._sync_to_model()
+            ops.EventLogDialog(self, self.F, self.state, self._monitored_slots()).show()
+
+    def _cmd_rtc(self):
+        if self._need_connection():
+            ops.rtc_dialog(self, self.F, self.state)
+
+    def _cmd_calibrate(self):
+        if self._need_connection():
+            ops.calibration_dialog(self, self.F, self.state)
+
+    def _flag_command(self, title, attr, setter):
+        card = self.state.card
+        new = ask_yes_no(self, title, f"{title}: enable?\n(currently {'ON' if getattr(card, attr) else 'OFF'})")
+        setter(new)
+        if self.state.connected:
+            try:
+                self.state.link.write_multi(59, [self.state.card.rack_status])
+            except Exception as e:                       # noqa: BLE001
+                self._error(title, e)
+
+    def _cmd_alarm_inhibit(self):
+        self._flag_command("Alarm inhibit", "alarm_inhibit", self.state.set_alarm_inhibit)
+
+    def _cmd_trip_multiply(self):
+        self._flag_command("Trip multiply", "trip_multiply", self.state.set_trip_multiply)
+
+    def _cmd_traffic(self):
+        ops.traffic_dialog(self, self.F, self.state)
 
     def _cmd_diag(self):
-        show_info(
-            self,
-            "Diagnostics",
-            "System OK — no faults detected.",
-        )
+        if self._need_connection():
+            ops.diagnostics_dialog(self, self.F, self.state)
 
     def _cmd_comm(self):
-        show_info(
-            self,
-            "Communication Settings",
-            "Communication settings ready.",
-        )
+        ops.comm_settings_dialog(self, self.F, self.state)
+
+    def _cmd_rack_address(self):
+        ops.rack_address_dialog(self, self.F, self.state)
+
+    def closeEvent(self, e):
+        if self._confirm_discard():
+            self.state.disconnect(quiet=True)
+            e.accept()
+        else:
+            e.ignore()
 
     def _cmd_about(self):
         show_info(

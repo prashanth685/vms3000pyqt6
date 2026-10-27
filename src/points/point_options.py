@@ -4,8 +4,8 @@ Theme-matched to the industrial SCADA palette (navy/steel/amber/teal).
 Provides right-click context menu for modules with Options, Setpoints and Point Names.
 """
 
-from PyQt6.QtCore import QPoint
-from PyQt6.QtWidgets import QMenu
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QMenu
 
 T = {
     # ── Context menu ───────────────────────────────────────────────────────

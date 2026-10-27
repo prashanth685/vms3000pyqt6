@@ -3,9 +3,9 @@ connection_dialog.py — VMS 3000 Direct Connection Dialog
 Dialog for direct connect with Rack Address, COM Port, and Baud Rate
 """
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QVBoxLayout, QWidget,
 )

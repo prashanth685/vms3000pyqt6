@@ -6,9 +6,9 @@ Design matching the reference image - Power Supply Module front panel
 import os
 import sys
 
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
-from PyQt6.QtWidgets import QWidget
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+from PySide6.QtWidgets import QWidget
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -329,7 +329,7 @@ class VMM6MModule(_Canvas):
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    from PyQt6.QtWidgets import QApplication, QHBoxLayout
+    from PySide6.QtWidgets import QApplication, QHBoxLayout
 
     app = QApplication(sys.argv)
     w = QWidget()

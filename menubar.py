@@ -5,8 +5,8 @@ Dark-navy menu bar with fixed-width items and crisp separators.
 
 from typing import Optional
 
-from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import QMainWindow, QMenu, QMenuBar
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import QMainWindow, QMenu, QMenuBar
 
 from theme import T
 
@@ -109,28 +109,36 @@ def build_menubar(root: QMainWindow, fonts: dict, commands: dict) -> QMenuBar:
         ("Undo",       None, False, "Ctrl+Z"),
         ("Redo",       None, False, "Ctrl+Y"),
         None,
-        ("Cut",        None, True,  "Ctrl+X"),
-        ("Copy",       None, True,  "Ctrl+C"),
-        ("Paste",      None, True,  "Ctrl+V"),
+        ("Cut",        commands.get("cut"),   True,  "Ctrl+X"),
+        ("Copy",       commands.get("copy"),  True,  "Ctrl+C"),
+        ("Paste",      commands.get("paste"), True,  "Ctrl+V"),
         None,
-        ("Select All", None, True,  "Ctrl+A"),
+        ("Select All", commands.get("select_all"), True,  "Ctrl+A"),
     ])
 
     # ── Utilities ───────────────────────────────────────────────────
     _drop("Utilities", [
-        ("Connect",           commands.get("connect"),    True),
+        ("Connect",           commands.get("direct_connect"), True),
         ("Disconnect",        commands.get("disconnect"), True),
+        None,
+        ("Upload from Rack",  commands.get("upload"),     True),
+        ("Download to Rack",  commands.get("download"),   True),
+        None,
+        ("Event Log…",        commands.get("events"),     True),
+        ("Date / Time…",      commands.get("rtc"),        True),
+        ("Alarm Inhibit…",    commands.get("alarm_inhibit"), True),
+        ("Trip Multiply…",    commands.get("trip_multiply"), True),
         None,
         ("Calibrate…",        commands.get("calibrate"),  True),
         ("Diagnostics…",      commands.get("diag"),       True),
-        ("Firmware Update…",  None,                       True),
+        ("Traffic View…",     commands.get("traffic"),    True),
     ])
 
     # ── Options ─────────────────────────────────────────────────────
     _drop("Options", [
         ("Preferences…",            None,                  True),
         ("Communication Settings…", commands.get("comm"),  True),
-        ("Rack Address…",           None,                  True),
+        ("Rack Address…",           commands.get("rack_address"), True),
         None,
         ("Theme",                   None,                  False),
     ])

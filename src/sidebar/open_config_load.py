@@ -3,7 +3,7 @@ open_config_load.py — VMS 3000  •  Load Configuration File Dialog
 Opens a native file dialog to select .rcs configuration files.
 """
 
-from PyQt6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog
 
 
 class LoadConfigDialog:

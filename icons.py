@@ -49,8 +49,8 @@ And connection/status states:
 import os
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import (
+from PySide6.QtCore import Qt, QRectF
+from PySide6.QtGui import (
     QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPixmap,
 )
 
@@ -661,7 +661,7 @@ if __name__ == "__main__":
 
     import sys
 
-    from PyQt6.QtWidgets import (
+    from PySide6.QtWidgets import (
         QApplication, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget,
     )
 

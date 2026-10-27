@@ -14,9 +14,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import serial
 import serial.tools.list_ports
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QPushButton, QVBoxLayout, QWidget,
 )

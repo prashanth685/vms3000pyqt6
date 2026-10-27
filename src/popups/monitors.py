@@ -3,7 +3,7 @@ monitors.py — VMS 3000  •  Cascading Menu System
 Cascading menu for module selection: Monitors → Proximeter/Tachometer → Models
 """
 
-from PyQt6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu
 
 
 class CascadingMenu:
@@ -70,7 +70,7 @@ class CascadingMenu:
         main_menu.addAction("No Modules").triggered.connect(self._pick("No Modules"))
 
         # Show menu at position (blocks until dismissed, like tk_popup)
-        from PyQt6.QtCore import QPoint
+        from PySide6.QtCore import QPoint
         main_menu.exec(QPoint(int(x), int(y)))
 
     def _add_monitors_submenu(self, parent_menu):
@@ -114,7 +114,7 @@ class CascadingMenu:
 
 if __name__ == "__main__":
     import sys
-    from PyQt6.QtWidgets import QApplication, QLabel
+    from PySide6.QtWidgets import QApplication, QLabel
 
     app = QApplication(sys.argv)
 

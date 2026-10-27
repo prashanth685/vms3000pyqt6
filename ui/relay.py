@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QCheckBox, QHBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QCheckBox, QHBoxLayout
 from controls.xp_button import XPButton
 
 class RelayWindow(QWidget):

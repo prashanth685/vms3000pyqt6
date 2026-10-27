@@ -16,8 +16,8 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel,
     QVBoxLayout, QWidget,
 )
@@ -228,6 +228,12 @@ class ProximityMonitor3000ConfigDialog:
         pair_type.setFont(self._f("field", 9))
         pair_type.addItems(["Radial Vibration", "Axial Vibration", "Thrust Position", "Not Used"])
         pair_type.setStyleSheet(self._combo_selected())
+        pair_key = f"{ch_a_num}_{ch_b_num}"
+        pair_type.setCurrentText(
+            ChannelConfigurationDialog.get_pair_type(self._model, self._slot_num, pair_key))
+        pair_type.currentTextChanged.connect(
+            lambda txt, k=pair_key: ChannelConfigurationDialog.set_pair_type(
+                self._model, self._slot_num, k, txt))
         gl.addWidget(pair_type)
         gl.addSpacing(4)
 
@@ -290,7 +296,9 @@ class ProximityMonitor3000ConfigDialog:
 
         chk = QCheckBox("Active")
         chk.setFont(self._f("field", 9))
-        chk.setChecked(True)
+        chk.setChecked(ChannelConfigurationDialog.get_active(self._model, self._slot_num, channel_num))
+        chk.toggled.connect(lambda v, ch=channel_num: ChannelConfigurationDialog.set_active(
+            self._model, self._slot_num, ch, v))
         bl.addWidget(chk)
         bl.addSpacing(8)
 

@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QLineEdit, QLabel, QHBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QLineEdit, QLabel, QHBoxLayout
 from controls.xp_button import XPButton
-from PyQt6.QtCore import QDateTime
+from PySide6.QtCore import QDateTime
 
 class RTCWindow(QWidget):
     def __init__(self):

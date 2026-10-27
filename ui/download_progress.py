@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QProgressBar, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QProgressBar, QLabel
 from controls.xp_button import XPButton
 
 class DownloadProgress(QWidget):

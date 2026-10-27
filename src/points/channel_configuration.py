@@ -8,8 +8,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QGridLayout,
     QGroupBox, QHBoxLayout, QLabel, QRadioButton, QButtonGroup,
     QStackedWidget, QTabBar, QVBoxLayout, QWidget,
@@ -93,6 +93,32 @@ class ChannelConfigurationDialog:
         "12M/DIS": {},  # {slot_num: {channel_num: config_dict}}
         "6M": {},       # {slot_num: {channel_num: config_dict}}
     }
+
+    # Persistent per-slot state that is not part of a channel's config dict
+    _pair_types = {}     # {(model, slot): {"1_2": "Radial Vibration", "3_4": ...}}
+    _active_flags = {}   # {(model, slot): {channel: bool}}
+
+    @classmethod
+    def get_pair_type(cls, model, slot, pair_key, default="Radial Vibration"):
+        return cls._pair_types.get((model, slot), {}).get(pair_key, default)
+
+    @classmethod
+    def set_pair_type(cls, model, slot, pair_key, value):
+        cls._pair_types.setdefault((model, slot), {})[pair_key] = value
+
+    @classmethod
+    def get_active(cls, model, slot, ch, default=True):
+        return cls._active_flags.get((model, slot), {}).get(ch, default)
+
+    @classmethod
+    def set_active(cls, model, slot, ch, value):
+        cls._active_flags.setdefault((model, slot), {})[ch] = bool(value)
+
+    @classmethod
+    def reset_all(cls):
+        cls._channel_configs = {"12M/DIS": {}, "6M": {}}
+        cls._pair_types = {}
+        cls._active_flags = {}
 
     # ------------------------------------------------------------------ #
     #  Init

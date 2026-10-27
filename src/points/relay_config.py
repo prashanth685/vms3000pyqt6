@@ -19,15 +19,17 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..")))
 
-from PyQt6.QtCore import QRectF, Qt
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QTextCursor
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QTextCursor
+from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
     QLabel, QListWidget, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout,
     QWidget,
 )
 
-from qt_common import center_on_parent, checkbox_qss, raised_button, scaled_pixmap
+from qt_common import center_on_parent, checkbox_qss, raised_button, scaled_pixmap, show_info, show_warning
+from core.relay_logic import RelayLogicError, parse_param, validate as validate_logic
+from points import relay_store
 
 # ── Classic "Windows Classic" gray theme, matching the reference screenshot ──
 # Falls back to this if the project theme.py isn't available / doesn't define
@@ -173,7 +175,7 @@ class SlotsRackWidget(QWidget):
             is_selected = (i == selected)
 
             # real module image, scaled to FIT the slot (aspect kept)
-            module = self._dlg._rack_config.get(f"0_{i}")
+            module = self._dlg._module_at(i)
             filename = self._dlg._resolve_module_image(module)
             box_w = max(1, (x1 - x0) - 4)
             box_h = max(1, (bot_y - self.TOP_Y) - 4)
@@ -229,6 +231,13 @@ class RelayConfigDialog:
         self._selected_slot = selected_slot
         self._rack_config = rack_config or {}  # Saved rack configuration data
         self._dialog = None
+        self._vb_slot = slot_num - 1                 # UI raw slot -> rack slot number
+        self._rcfg = relay_store.get(slot_num)       # working copy of the 4 relay channels
+        self._cur_ch = 1
+        if not self._module_at(selected_slot):
+            first = next((n for n in range(1, self.NUM_SLOTS + 1) if self._module_at(n)
+                          and self._channel_count_for_module(self._module_at(n)) > 0), selected_slot)
+            selected_slot = first
 
         # ── Full data model — every field visible in the reference dialog ──
         self.config_data = {
@@ -240,9 +249,9 @@ class RelayConfigDialog:
             "logic_expression": "",          # built via And/Or/(/)/Enter keypad
             "logic_percent": 0,              # "0%" readout under keypad
             "channel_association": "Channel 1",
-            "active": False,
-            "latching_relay": False,
-            "alarm_drive_logic": "",
+            "active": self._rcfg.channels[1].active,
+            "latching_relay": self._rcfg.channels[1].latching,
+            "alarm_drive_logic": self._rcfg.channels[1].logic,
             "ne_nde_switch_status": "",
         }
 
@@ -296,7 +305,7 @@ class RelayConfigDialog:
         header.addSpacing(24)
         header.addWidget(self._label("Relay Slot:", True))
         header.addSpacing(4)
-        header.addWidget(self._label(str(self._slot_num)))
+        header.addWidget(self._label(str(self._vb_slot)))
         header.addStretch(1)
         main.addLayout(header)
         main.addSpacing(8)
@@ -356,13 +365,17 @@ class RelayConfigDialog:
         if hasattr(self, "_slots_widget"):
             self._slots_widget.update()
 
+    def _module_at(self, n):
+        """Module assigned to rack slot n (1..11). UI keys are raw slots = n + 1."""
+        return self._rack_config.get(f"0_{n + 1}")
+
     def _on_slot_selected(self, slot_num):
         """Select a slot in the rack graphic and populate the Available
         Monitor channels/Alarms list for the module installed there."""
         self.config_data["selected_slot"] = slot_num
         self._redraw_slots_rack()
 
-        module = self._rack_config.get(f"0_{slot_num}")
+        module = self._module_at(slot_num)
         entries = self._monitor_entries_for_slot(slot_num, module)
         self.config_data["monitor_channels"] = entries
 
@@ -372,12 +385,6 @@ class RelayConfigDialog:
             self._monitor_listbox.addItems(entries)
             self._monitor_listbox.blockSignals(False)
 
-        # Update channel association dropdown based on available channels
-        self._update_channel_association_dropdown(module)
-
-        # Auto-populate Alarm Drive Logic when a module with channels is selected
-        if module and self._channel_count_for_module(module) > 0:
-            self._auto_populate_alarm_logic(slot_num, module)
 
     @staticmethod
     def _channel_count_for_module(module):
@@ -515,7 +522,13 @@ class RelayConfigDialog:
         widget = getattr(self, "_alarm_logic_text", None)
         if widget is not None:
             self.config_data["logic_expression"] = self._logic_text()
-        print(f"Enter logic expression: {self.config_data['logic_expression']}")
+        text = self._logic_text().strip()
+        try:
+            validate_logic(text)
+            self._check_parameters(text)
+            show_info(self._dialog, "Alarm Drive Logic", "Expression is valid." if text else "Expression is empty.")
+        except RelayLogicError as e:
+            show_warning(self._dialog, "Alarm Drive Logic", f"Syntax error: {e}")
 
     def _on_logic_backspace(self):
         widget = getattr(self, "_alarm_logic_text", None)
@@ -570,10 +583,10 @@ class RelayConfigDialog:
 
         self._channel_combo = QComboBox()
         self._channel_combo.setFont(self._f_norm)
-        self._channel_combo.addItems([f"Channel {i}" for i in range(1, 9)])
+        self._channel_combo.addItems([f"Channel {i}" for i in range(1, 5)])
         self._channel_combo.setCurrentText(self.config_data["channel_association"])
         self._channel_combo.setStyleSheet("QComboBox { background:#ffffff; color:#000; padding:2px 4px; }")
-        self._channel_combo.activated.connect(lambda _i: self._on_channel_selected())
+        self._channel_combo.activated.connect(lambda _i: self._on_relay_channel_changed())
         parent_layout.addWidget(self._channel_combo)
         parent_layout.addSpacing(6)
 
@@ -594,86 +607,38 @@ class RelayConfigDialog:
     def _on_voting_setup(self):
         print(f"And Voting Setup for slot {self._slot_num}")
 
-    def _logic_for_channel(self, slot_num, channel_num):
-        entries = [
-            f"S{slot_num}C{channel_num:02d}A1 (Slot {slot_num} Channel {channel_num} Alert)",
-            f"S{slot_num}C{channel_num:02d}A2 (Slot {slot_num} Channel {channel_num} Danger)",
-        ]
-        return " + ".join(e.split()[0] for e in entries)
+    def _store_current_channel(self):
+        """Copy the visible channel widgets into the working relay config."""
+        ch = self._rcfg.channels[self._cur_ch]
+        ch.active = self._active_chk.isChecked()
+        ch.latching = self._latching_chk.isChecked()
+        ch.logic = self._logic_text().strip()
 
-    def _on_channel_selected(self):
-        """When a channel is chosen in the Channel Association dropdown,
-        populate the Alarm Drive Logic text with that channel's points."""
-        selected_channel = self._channel_combo.currentText()
-        if not selected_channel:
-            return
-
-        # Extract channel number from "Channel X" format
+    def _on_relay_channel_changed(self):
+        """Switch the editor to another relay output channel (1-4)."""
+        self._store_current_channel()
         try:
-            channel_num = int(selected_channel.split()[-1])
+            self._cur_ch = int(self._channel_combo.currentText().split()[-1])
         except (IndexError, ValueError):
             return
-
-        selected_slot = self.config_data["selected_slot"]
-        module = self._rack_config.get(f"0_{selected_slot}")
-
-        # Only populate if there's a module with channels in the selected slot
-        n_channels = self._channel_count_for_module(module)
-        if n_channels <= 0 or channel_num > n_channels:
-            return
-
-        logic_expression = self._logic_for_channel(selected_slot, channel_num)
-        self._alarm_logic_text.setPlainText(logic_expression)
-        self.config_data["alarm_drive_logic"] = logic_expression
-        print(f"Populated Alarm Drive Logic for Channel {channel_num}: {logic_expression}")
-
-    def _auto_populate_alarm_logic(self, slot_num, module):
-        """Auto-populate the Alarm Drive Logic text when a module with
-        channels is selected in the rack."""
-        n_channels = self._channel_count_for_module(module)
-        if n_channels <= 0:
-            return
-
-        selected_channel = self._channel_combo.currentText()
-        if not selected_channel:
-            return
-
-        try:
-            channel_num = int(selected_channel.split()[-1])
-        except (IndexError, ValueError):
-            channel_num = 1  # Default to channel 1 if parsing fails
-
-        # Validate channel number against available channels
-        if channel_num > n_channels:
-            channel_num = 1
-
-        logic_expression = self._logic_for_channel(slot_num, channel_num)
-        self._alarm_logic_text.setPlainText(logic_expression)
-        self.config_data["alarm_drive_logic"] = logic_expression
-        print(f"Auto-populated Alarm Drive Logic for Slot {slot_num}, "
-              f"Channel {channel_num}: {logic_expression}")
+        ch = self._rcfg.channels[self._cur_ch]
+        self._active_chk.setChecked(ch.active)
+        self._latching_chk.setChecked(ch.latching)
+        self._alarm_logic_text.setPlainText(ch.logic)
+        self.config_data["channel_association"] = self._channel_combo.currentText()
+        self.config_data["logic_expression"] = ch.logic
 
     def _update_channel_association_dropdown(self, module):
-        """Update the Channel Association dropdown based on the number of
-        available channels in the selected module."""
-        if not hasattr(self, "_channel_combo"):
-            return
-        n_channels = self._channel_count_for_module(module)
-        combo = self._channel_combo
+        """Relay output channels are always 1-4; kept for API compatibility."""
+        return
 
-        if n_channels <= 0:
-            combo.clear()
-            combo.addItem("No Channels")
-            combo.setCurrentIndex(0)
-            combo.setEnabled(False)
-        else:
-            channel_values = [f"Channel {i}" for i in range(1, n_channels + 1)]
-            current = combo.currentText()
-            combo.setEnabled(True)
-            combo.clear()
-            combo.addItems(channel_values)
-            # keep the current selection if still valid, else the first channel
-            combo.setCurrentText(current if current in channel_values else channel_values[0])
+    def _check_parameters(self, expr):
+        """Every point must refer to an existing monitor module (VB check_parameters_channel_active)."""
+        for tok in expr.replace("(", " ").replace(")", " ").replace("+", " ").replace("*", " ").split():
+            slot, ch, _alert = parse_param(tok)
+            module = self._module_at(slot)
+            if self._channel_count_for_module(module) <= 0:
+                raise RelayLogicError(f"{tok}: slot {slot} has no monitor module")
 
     # ──────────────────────────────────────────────────────────────────
     #  Alarm Drive Logic
@@ -716,14 +681,25 @@ class RelayConfigDialog:
     #  Button handlers
     # ──────────────────────────────────────────────────────────────────
     def _on_ok(self):
-        self.config_data["channel_association"] = self._channel_combo.currentText()
-        self.config_data["active"] = self._active_chk.isChecked()
-        self.config_data["latching_relay"] = self._latching_chk.isChecked()
-        self.config_data["alarm_drive_logic"] = self._logic_text()
-        self.config_data["monitor_channels"] = [
-            self._monitor_listbox.item(i).text() for i in range(self._monitor_listbox.count())
-        ]
-        print(f"Ok — relay configuration applied for slot {self._slot_num}: {self.config_data}")
+        self._store_current_channel()
+        for n in range(1, 5):
+            ch = self._rcfg.channels[n]
+            try:
+                validate_logic(ch.logic)
+                if ch.logic:
+                    self._check_parameters(ch.logic)
+                if ch.active and not ch.logic:
+                    raise RelayLogicError("a relay channel cannot be made active without a proper drive logic")
+            except RelayLogicError as e:
+                self._channel_combo.setCurrentText(f"Channel {n}")
+                self._on_relay_channel_changed()
+                show_warning(self._dialog, "Relay Configuration", f"Relay channel {n}: {e}")
+                return
+        # slots monitored by the relay = every slot that holds a monitor module
+        self._rcfg.monitored_slots = [
+            1 if self._channel_count_for_module(self._module_at(n)) > 0 else 0 for n in range(1, 13)]
+        relay_store.put(self._slot_num, self._rcfg)
+        self.config_data["alarm_drive_logic"] = self._rcfg.channels[self._cur_ch].logic
         self._dialog.accept()
 
     def _on_point_names(self):
@@ -739,14 +715,15 @@ class RelayConfigDialog:
         print("Help — Relay Configuration")
 
     def _on_copy(self):
-        print(f"Copy relay configuration for slot {self._slot_num}")
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(self._logic_text())
 
 
 # ══════════════════════════════════════════════════════════════════════════
 #  Standalone demo
 # ══════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")

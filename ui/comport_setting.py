@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox
+from PySide6.QtWidgets import QWidget, QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox
 from controls.xp_button import XPButton
 
 class ComPortSetting(QWidget):

@@ -18,8 +18,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QButtonGroup, QGroupBox, QRadioButton, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QButtonGroup, QGroupBox, QRadioButton, QVBoxLayout
 
 from qt_common import ThemedDialog, group_qss, pick_font
 
@@ -148,3 +148,20 @@ if __name__ == "__main__":
 
     app = ensure_qapp()
     print("Saved:", open_rack_setup(None, make_fonts(), on_ok=lambda cfg: print("Saved:", cfg)))
+
+
+# ── ConfigCard.rack_type_size  <->  dialog selection ─────────────────
+_SYS_BITS = {"standard": 256, "standard_display": 512, "ch20": 768}
+_SIZE_BITS = {"full": 16, "mini": 32}
+_IF_BITS = {"standard": 1, "ethernet": 2}
+
+
+def rack_type_to_cfg(rts: int) -> dict:
+    inv = lambda d, v, default: next((k for k, b in d.items() if b == v), default)
+    return {"system_type": inv(_SYS_BITS, rts & 0xF00, "standard"),
+            "rack_size": inv(_SIZE_BITS, rts & 0x30, "full"),
+            "interface": inv(_IF_BITS, rts & 0x03, "standard")}
+
+
+def cfg_to_rack_type(cfg: dict) -> int:
+    return _SYS_BITS[cfg["system_type"]] | _SIZE_BITS[cfg["rack_size"]] | _IF_BITS[cfg["interface"]]

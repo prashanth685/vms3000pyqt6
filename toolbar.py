@@ -7,8 +7,8 @@ import sys
 import os
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QPoint, QSize
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QPoint, QSize
+from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -362,6 +362,23 @@ class VmsToolbar(QWidget):
         """
 
         menu = QMenu(self)
+        menu.setStyleSheet(
+            f"""
+            QMenu {{
+                background:{T['toolbar_bg']};
+                color:{T['text']};
+                border:1px solid {T['toolbar_border']};
+            }}
+            QMenu::item {{
+                padding:6px 20px;
+                background:transparent;
+            }}
+            QMenu::item:hover {{
+                background:{T['btn_hover']};
+                color:{T['text']};
+            }}
+            """
+        )
 
         direct_action = menu.addAction(
             "Direct connect"
@@ -403,57 +420,22 @@ class VmsToolbar(QWidget):
     # ──────────────────────────────────────────────────────────────────
 
     def _on_direct_connect(self) -> None:
-        """
-        Open direct COM-port connection dialog.
-        """
-
-        try:
-            com_ports = get_available_com_ports()
-
-            dialog = ConnectionDialog(
-                self.window(),
-                com_ports,
-            )
-
-            result = dialog.show()
-
-            if result:
-                print(
-                    f"Direct connect: {result}"
-                )
-
-        except Exception as e:
-            print(
-                f"Error opening direct connect dialog: {e}"
-            )
-
-    # ──────────────────────────────────────────────────────────────────
-    # Network connection
-    # ──────────────────────────────────────────────────────────────────
+        cb = self._callbacks.get("direct_connect")
+        if cb:
+            cb()
 
     def _on_network_connect(self) -> None:
-        """
-        Handle network connection.
-        """
-
-        print("Network connect clicked")
-
-        # TODO:
-        # Implement network connection functionality
-
-    # ──────────────────────────────────────────────────────────────────
-    # Disconnect
-    # ──────────────────────────────────────────────────────────────────
+        cb = self._callbacks.get("network_connect")
+        if cb:
+            cb()
 
     def _on_disconnect(self) -> None:
-        """
-        Handle disconnect.
-        """
+        cb = self._callbacks.get("disconnect")
+        if cb:
+            cb()
 
-        print("Disconnect clicked")
-
-        # TODO:
-        # Implement disconnect functionality
+    def set_rack_address(self, value) -> None:
+        self.rack_edit.setText(str(value))
 
 
 # ──────────────────────────────────────────────────────────────────────

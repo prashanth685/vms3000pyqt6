@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QMainWindow, QMdiArea, QMdiSubWindow
+from PySide6.QtWidgets import QMainWindow, QMdiArea, QMdiSubWindow
 from ui.menu import MainMenu
 
 class MDIWindow(QMainWindow):

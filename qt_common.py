@@ -19,10 +19,10 @@ import os
 import tempfile
 from typing import Callable, Iterable, Optional
 
-from PyQt6.QtCore import Qt, QSize, QRectF
-from PyQt6.QtGui import QFont, QColor, QPixmap, QGuiApplication, QPainter, QPen, QPolygonF, QPalette
-from PyQt6.QtCore import QPointF
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QSize, QRectF
+from PySide6.QtGui import QFont, QColor, QPixmap, QGuiApplication, QPainter, QPen, QPolygonF, QPalette
+from PySide6.QtCore import QPointF
+from PySide6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QPushButton, QGroupBox, QMessageBox, QLineEdit, QSizePolicy,
 )
@@ -170,7 +170,7 @@ def qcolor(hex_or_name: str, alpha: Optional[int] = None) -> QColor:
 
 def char_width(font: QFont, n: int) -> int:
     """Pixel width of *n* '0' characters — Tk's ``width=N`` (in characters)."""
-    from PyQt6.QtGui import QFontMetrics
+    from PySide6.QtGui import QFontMetrics
     return QFontMetrics(font).horizontalAdvance("0") * n
 
 

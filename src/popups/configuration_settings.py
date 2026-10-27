@@ -8,13 +8,15 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QVBoxLayout
 
 from qt_common import (
     ThemedDialog, group_qss, make_entry, pick_font, show_help_dialog, char_width,
 )
 from .securityOption import SecurityOptionsPopup
+from core.config_card import ConfigCard
+from qt_common import show_warning
 
 
 class ConfigurationSettingsPopup:
@@ -49,20 +51,23 @@ class ConfigurationSettingsPopup:
         "Refer to the VMS 3000 User Manual for full details."
     )
 
-    def __init__(self, parent, fonts):
+    def __init__(self, parent, fonts, card: ConfigCard = None):
         self._fonts = fonts
         self._parent = parent
         self._dialog = None
         self._vars = {}          # field-key → QLineEdit
+        self.card = card or ConfigCard()
+        self.accepted = False
 
+        c = self.card
         self._defaults = {
-            "connect_password":    "",
-            "config_password":     "",
-            "network_device_name": "RACK0001",
-            "rack_ip_address":     "192.168.1.255",
-            "rack_subnet_mask":    "255.255.255.1",
-            "gateway":             "192.168.1.1",
-            "service_port_number": "502",
+            "connect_password":    c.connect_password,
+            "config_password":     c.config_password,
+            "network_device_name": c.device_name,
+            "rack_ip_address":     c.ip,
+            "rack_subnet_mask":    c.subnet,
+            "gateway":             c.gateway,
+            "service_port_number": str(c.service_port),
         }
 
         self._create_dialog()
@@ -135,10 +140,20 @@ class ConfigurationSettingsPopup:
         return {k: e.text() for k, e in self._vars.items()}
 
     def _on_ok(self):
-        print("Configuration saved:")
-        for k, v in self.values().items():
-            if "password" not in k:
-                print(f"  {k}: {v}")
+        v = self.values()
+        try:
+            port = int(v["service_port_number"])
+        except ValueError:
+            port = -1
+        new = ConfigCard.from_dict(self.card.to_dict())
+        new.connect_password, new.config_password = v["connect_password"], v["config_password"]
+        new.device_name, new.ip = v["network_device_name"], v["rack_ip_address"]
+        new.subnet, new.gateway, new.service_port = v["rack_subnet_mask"], v["gateway"], port
+        errs = new.validate()
+        if errs:
+            show_warning(self._dialog, "Configuration Settings", "\n".join(errs))
+            return
+        self.card, self.accepted = new, True
         self._dialog.accept()
 
     def _on_cancel(self):
@@ -146,7 +161,10 @@ class ConfigurationSettingsPopup:
 
     def _on_security_opt(self):
         """Open Security Options popup dialog."""
-        SecurityOptionsPopup(self._dialog, self._fonts).show()
+        pop = SecurityOptionsPopup(self._dialog, self._fonts, self.card.security)
+        pop.show()
+        if pop.accepted:
+            self.card.security = pop.security
 
     def _on_help(self):
         show_help_dialog(self._dialog, "Configuration Settings — Help", self._HELP,
@@ -154,7 +172,8 @@ class ConfigurationSettingsPopup:
 
     def show(self):
         """Display the dialog and block until it is closed."""
-        return self._dialog.show_modal()
+        self._dialog.show_modal()
+        return self.accepted
 
 
 # ══════════════════════════════════════════════════════════════════════════════

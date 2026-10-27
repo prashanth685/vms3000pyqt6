@@ -11,9 +11,9 @@ import math
 import os
 import sys
 
-from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -206,6 +206,10 @@ class RackArea(QWidget):
 
     # ── Public ──────────────────────────────────────────────────────
     def clear(self):
+        from points import relay_store, setpoint_store
+        ChannelConfigurationDialog.reset_all()
+        setpoint_store.clear()
+        relay_store.clear()
         self._slot_data.clear()
         self._selected = None
         self.draw()
@@ -219,93 +223,25 @@ class RackArea(QWidget):
     def get_slot_data(self) -> dict:
         return dict(self._slot_data)
 
-    def save_configuration(self, name: str = None):
-        """Save current rack configuration to local system."""
-        if not name:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_name = f"rack_config_{timestamp}.rcs"
-        else:
-            default_name = f"{name}.rcs"
+    # ── Change tracking / per-slot state ────────────────────────────
+    def _notify_changed(self):
+        cb = getattr(self, "on_change", None)
+        if cb:
+            cb()
 
-        file_path, _ = QFileDialog.getSaveFileName(
-            self._canvas, "Save Configuration", default_name,
-            "Rack Configuration Files (*.rcs);;All files (*)",
-        )
-        if not file_path:
-            return None
-        if "." not in os.path.basename(file_path):
-            file_path += ".rcs"
-
-        try:
-            config = {
-                "timestamp": datetime.datetime.now().isoformat(),
-                "slot_data": self._slot_data,
-                "slot_count": SLOT_COUNT,
-                "channel_configs": ChannelConfigurationDialog._channel_configs,
-            }
-            with open(file_path, "w") as f:
-                json.dump(config, f, indent=2)
-            show_info(self._canvas, "Save Configuration", f"Configuration saved to {file_path}")
-            return file_path
-        except Exception as e:
-            show_error(self._canvas, "Save Error", f"Failed to save configuration: {e}")
-            return None
-
-    def load_configuration(self):
-        """Load rack configuration from local system."""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self._canvas, "Load Configuration", "",
-            "Rack Configuration Files (*.rcs);;All files (*)",
-        )
-        if not file_path:
-            return None
-
-        try:
-            with open(file_path, "r") as f:
-                config = json.load(f)
-
-            self._slot_data.clear()
-            self._slot_data.update(config.get("slot_data", {}))
-
-            # Restore channel configurations
-            channel_configs = config.get("channel_configs", {})
-            if channel_configs:
-                # Convert string keys back to integers (JSON converts int keys to strings)
-                converted_configs = {}
-                for model, slots in channel_configs.items():
-                    # Check if this is the old format (no slot numbers) or new format (with slot numbers)
-                    # Old format: {model: {channel_num: config}}
-                    # New format: {model: {slot_num: {channel_num: config}}}
-                    first_key = next(iter(slots.keys())) if slots else None
-                    if first_key and isinstance(slots[first_key], dict):
-                        # Check if the value is a channel config (has transducer_type) or a slot dict
-                        if "transducer_type" in slots[first_key]:
-                            # Old format - no slot numbers, assume slot 2
-                            converted_channels = {}
-                            for ch_num_str, ch_config in slots.items():
-                                converted_channels[int(ch_num_str)] = ch_config
-                            converted_configs[model] = {2: converted_channels}
-                        else:
-                            # New format - has slot numbers
-                            converted_slots = {}
-                            for slot_num_str, channels in slots.items():
-                                converted_channels = {}
-                                for ch_num_str, ch_config in channels.items():
-                                    converted_channels[int(ch_num_str)] = ch_config
-                                converted_slots[int(slot_num_str)] = converted_channels
-                            converted_configs[model] = converted_slots
-                    else:
-                        # Empty or invalid format
-                        converted_configs[model] = {}
-                ChannelConfigurationDialog._channel_configs = converted_configs
-
-            self._selected = None
-            self.draw()
-            show_info(self._canvas, "Load Configuration", f"Configuration loaded from {file_path}")
-            return config
-        except Exception as e:
-            show_error(self._canvas, "Load Error", f"Failed to load configuration: {e}")
-            return None
+    @staticmethod
+    def reset_slot_stores(raw: int):
+        """Forget channel/setpoint/relay data of a raw slot (module replaced or removed)."""
+        from points import relay_store, setpoint_store
+        for model in list(ChannelConfigurationDialog._channel_configs):
+            ChannelConfigurationDialog._channel_configs[model].pop(raw, None)
+        for k in [k for k in ChannelConfigurationDialog._pair_types if k[1] == raw]:
+            ChannelConfigurationDialog._pair_types.pop(k, None)
+        for k in [k for k in ChannelConfigurationDialog._active_flags if k[1] == raw]:
+            ChannelConfigurationDialog._active_flags.pop(k, None)
+        for model in setpoint_store.all_data().values():
+            model.pop(raw, None)
+        relay_store.remove(raw)
 
     # ── Layout constants ────────────────────────────────────────────
     def _layout(self, W: int, H: int) -> dict:
@@ -748,7 +684,10 @@ class RackArea(QWidget):
 
     # ── Configuration Settings dialog (for slot 1) ──────────────────
     def _config_settings_dialog(self):
-        ConfigurationSettingsPopup(self._canvas, self._fonts).show()
+        st = getattr(self, "app_state", None)
+        dlg = ConfigurationSettingsPopup(self._canvas, self._fonts, st.card if st else None)
+        if dlg.show() and st:
+            st.set_card(dlg.card)
         self._selected = None
         self.draw()
         self.set_hint("Configuration Settings closed")
@@ -813,7 +752,9 @@ class RackArea(QWidget):
             if current_module and selection != "No Modules" and current_module != selection:
                 def on_switch_confirmed(confirmed):
                     if confirmed:
+                        self.reset_slot_stores(slot_num)
                         self._slot_data[key] = selection
+                        self._notify_changed()
                         self._selected = key
                         self.draw()
                         self.set_hint(f"Slot {slot_num} → {self._slot_data.get(key, 'Empty')}")
@@ -823,6 +764,9 @@ class RackArea(QWidget):
                 ).show()
                 return
 
+            if self._slot_data.get(key) != (None if selection == "No Modules" else selection):
+                self.reset_slot_stores(slot_num)
+                self._notify_changed()
             if selection == "No Modules":
                 self._slot_data.pop(key, None)
             else:

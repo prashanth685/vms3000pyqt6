@@ -5,8 +5,8 @@ Modern navigation buttons with unique accent colors.
 
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from theme import T
 from qt_common import hline, qfont

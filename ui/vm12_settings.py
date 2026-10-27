@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QCheckBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QCheckBox
 from controls.xp_button import XPButton
 
 class VM12Settings(QWidget):

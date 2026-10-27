@@ -8,8 +8,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QCheckBox, QLabel
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QCheckBox, QLabel
 
 from qt_common import (
     ThemedDialog, checkbox_qss, make_button, pick_font, show_help_dialog, group_qss,
@@ -64,21 +64,17 @@ class SecurityOptionsPopup:
         "Refer to the VMS 3000 User Manual for full security configuration details."
     )
 
-    def __init__(self, parent, fonts):
+    def __init__(self, parent, fonts, security=None):
         self._fonts = fonts
         self._parent = parent
         self._dialog = None
         self._vars = {}            # key → QCheckBox
+        self.accepted = False
+        self.security = 1 if security is None else int(security)
 
         # Default states — first checkbox ticked, rest unchecked (matches image)
-        self._defaults = {
-            "change_setpoints":             True,
-            "disable_front_comm":           False,
-            "drive_relay_address_change":   False,
-            "drive_relay_module_change":    False,
-            "drive_relay_keyswitch_change": False,
-            "disable_rcs_download":         False,
-        }
+        self._defaults = {key: bool(self.security >> i & 1)
+                          for i, (_lbl, key) in enumerate(self._CHECKBOXES)}
 
         self._create_dialog()
 
@@ -91,7 +87,7 @@ class SecurityOptionsPopup:
         P = d.P
 
         # ── Security group box + checkboxes ───────────────────────────
-        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout
+        from PySide6.QtWidgets import QGroupBox, QVBoxLayout
         grp = QGroupBox("  Configuration Module Security Options  ")
         grp.setFont(pick_font(self._fonts, "sm_b", size=9, bold=True))
         grp.setStyleSheet(group_qss(P))
@@ -128,9 +124,8 @@ class SecurityOptionsPopup:
     # ------------------------------------------------------------------ #
 
     def _on_ok(self):
-        print("Security Options saved:")
-        for k, chk in self._vars.items():
-            print(f"  {k}: {'Enabled' if chk.isChecked() else 'Disabled'}")
+        self.security = sum(1 << i for i, (_l, k) in enumerate(self._CHECKBOXES) if self._vars[k].isChecked())
+        self.accepted = True
         self._dialog.accept()
 
     def _on_cancel(self):

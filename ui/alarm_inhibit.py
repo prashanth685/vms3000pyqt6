@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, 
                            QCheckBox, QLineEdit, QGridLayout, QFrame)
-from PyQt6.QtCore import Qt
+from PySide6.QtCore import Qt
 from controls.xp_button import XPButton
 from modules.modbus import ModbusClient
 from modules.globals import *  # Assuming shared registers/constants

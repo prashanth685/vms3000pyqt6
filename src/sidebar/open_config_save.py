@@ -3,7 +3,7 @@ open_config_save.py — VMS 3000  •  Save Configuration File Dialog
 Opens a native file dialog to save .rcs configuration files.
 """
 
-from PyQt6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QFileDialog
 
 
 class SaveConfigDialog:

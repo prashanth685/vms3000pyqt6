@@ -19,13 +19,14 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF
+from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
 )
 
+from points.setpoint_store import SetpointPersistence
 from qt_common import center_on_parent, checkbox_qss, hline, show_warning
 
 # Import to access channel configurations
@@ -312,7 +313,7 @@ _DEFAULT_COLORS = {
 }
 
 
-class SetpointsDialog:
+class SetpointsDialog(SetpointPersistence):
     """Setpoints - Radial Vibration configuration dialog for a DIS_MODULE channel."""
 
     def __init__(self, parent, fonts, slot_num, channel_num=1, model="12M/DIS"):
@@ -513,6 +514,7 @@ class SetpointsDialog:
         self._build_ui()
         # Load configured values after building UI
         self._load_channel_configuration()
+        self._sp_load()
         # Update labels with correct units after building UI
         unit_text = "mil pp" if self._scale_unit == "mil" else "µm pp"
         if self._label_direct1:
@@ -522,9 +524,12 @@ class SetpointsDialog:
         # Update entry boxes with loaded values
         self._entry_direct1.setText(str(self.direct1_value))
         self._entry_direct2.setText(str(self.direct2_value))
+        self._entry_gap.setText(str(self.gap_value))
+        self._gap_secondary_box.setText(str(self.gap_secondary))
         # Update gauges with loaded values
         self._update_direct1_gauge()
         self._update_direct2_gauge()
+        self._update_gap_gauge()
         center_on_parent(d, self._parent)
         d.exec()
 
@@ -727,7 +732,7 @@ class SetpointsDialog:
     #  Button handlers
     # ──────────────────────────────────────────────────────────────────
     def _on_ok(self):
-        print(f"Ok - setpoints applied for slot {self._slot_num}")
+        self._sp_save()
         self._dialog.accept()
 
     def _on_copy(self):
@@ -749,10 +754,12 @@ class SetpointsDialog:
             self._reset_gauge_display()
 
     def _on_channel_change(self, text):
+        self._sp_save()
         """Handle channel selection change - reload configuration for the new channel."""
         if "channel" in text.lower():
             self._channel_num = int(text.split()[-1])
             self._load_channel_configuration()
+            self._sp_load()
             self._entry_direct1.setText(str(self.direct1_value))
             self._entry_direct2.setText(str(self.direct2_value))
             self._entry_gap.setText(str(self.gap_value))
@@ -1050,7 +1057,7 @@ class SetpointsDialog:
 #  Standalone demo
 # ══════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
